@@ -195,10 +195,15 @@ export const normaliseRoute = (picked: DeptId[]): DeptId[] => {
  * If we are drawing the artwork, the job has to stop at Design, otherwise it
  * would sit waiting for a proof that no station is ever asked to make.
  */
-export const withDesignIfNeeded = (route: DeptId[], artwork: Artwork): DeptId[] =>
-  artwork === "in_house" && !route.includes("design")
-    ? ["admin", "design", ...route.slice(1)]
-    : route;
+export const withDesignIfNeeded = (route: DeptId[], artwork: Artwork): DeptId[] => {
+  if (artwork !== "in_house") return route;
+  // Design must also come BEFORE every production stop, or the job deadlocks:
+  // the production stage waits on a sign-off, and Design waits on the unfinished
+  // production stage sitting in front of it. Reachable because the manager sets
+  // the order of the middle stations themselves.
+  const rest = route.slice(1, -1).filter(d => d !== "design");
+  return ["admin", "design", ...rest, "accounts"];
+};
 
 /** True when a route is legal: Admin first, Accounts last, no repeats. */
 export const routeIsValid = (route: DeptId[]) =>
