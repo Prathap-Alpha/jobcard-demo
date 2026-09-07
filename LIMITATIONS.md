@@ -93,3 +93,25 @@ Whichever it is, it is a one-line change to the routes.
   showing what is owed.
 - **Nothing re-draws on a timer except the wall board.** A job that tips over its
   promised time only turns red on the other screens when something else changes.
+
+
+# Three of the client's 13 points are NOT covered
+
+Written down because an email to the client claimed all 13 were, which was wrong.
+
+**Proof of payment is not handled at all.** They share payment slips in a WhatsApp
+group today. Accounts records a payment by typing an amount with nothing attached
+to it. For a shop that takes a deposit on most jobs this is the biggest missing
+piece, and it is the one they will notice first.
+
+**Odoo is referenced, not connected.** Every job carries a quotation number and a
+sync state, but nothing reads from or writes to Odoo.
+
+**No cost guidance was given.** They asked what a system like this typically costs.
+Pricing sits with Tlotlo, but the question has not been answered by anyone.
+
+Point 10 is half done: automatic overdue chasing is built and de-duplicated, but
+they invited a recommendation on whether that is the right approach. Ours, now sent
+to them: the manager gets a morning list and approves each chase, because a large
+share of late jobs are late waiting on the customer's own approval and apologising
+to that customer automatically trains them to ignore the messages.
