@@ -10,6 +10,8 @@ import Board from "./pages/Board";
 import Accounts from "./pages/Accounts";
 import Client from "./pages/Client";
 import Comms from "./pages/Comms";
+import Overdue from "./pages/Overdue";
+import Odoo from "./pages/Odoo";
 import NotFound from "./pages/NotFound";
 
 // Works both at the site root and under a GitHub Pages subpath.
@@ -31,6 +33,8 @@ export default function App() {
             <Route path="/accounts" component={Accounts} />
             <Route path="/client" component={Client} />
             <Route path="/comms" component={Comms} />
+            <Route path="/overdue" component={Overdue} />
+            <Route path="/odoo" component={Odoo} />
             <Route component={NotFound} />
           </Switch>
         </WouterRouter>

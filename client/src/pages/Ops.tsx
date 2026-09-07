@@ -8,6 +8,7 @@ import {
   DEPTS, ORDER_TYPES, balanceOf, deptById, fmtP, isComplete, isOverdue, normaliseRoute,
   orderState, orderTypeById, withDesignIfNeeded, type DeptId, type Order, type OrderTypeId,
 } from "@/lib/domain";
+import { lookupQuote, openQuotes } from "@/lib/odoo";
 import { useStore } from "@/lib/store";
 import { cn } from "@/lib/utils";
 
@@ -50,6 +51,32 @@ function NewOrderForm({ onDone, from }: { onDone: () => void; from?: Order }) {
   const [extra, setExtra] = useState<DeptId[]>(
     from ? from.route.filter(d => d !== "admin" && d !== "accounts") : ["design"],
   );
+  const [odooRef, setOdooRef] = useState(from?.odooRef ?? "");
+  const [quoteBox, setQuoteBox] = useState("");
+  const [pulling, setPulling] = useState(false);
+
+  /** Fill the whole form from an Odoo quotation so nothing is retyped. */
+  const pullFromOdoo = async (ref: string) => {
+    setPulling(true);
+    const q = await lookupQuote(ref);
+    setPulling(false);
+    if (!q) {
+      toast.error("No such quotation in Odoo", { description: "It looks like SO-2026-1806." });
+      return;
+    }
+    setF(p => ({
+      ...p,
+      customer: q.customer, contact: q.contact, email: q.email,
+      type: q.type, description: q.description, qty: String(q.qty),
+      total: String(q.total), deposit: String(q.deposit),
+      fulfilment: q.address ? "delivery" : "collection",
+      address: q.address ?? "",
+    }));
+    setExtra(orderTypeById(q.type).defaultRoute.filter(d => d !== "admin" && d !== "accounts"));
+    setOdooRef(q.ref);
+    setQuoteBox("");
+    toast.success(`Pulled ${q.ref} from Odoo`, { description: `${q.customer}, ${fmtP(q.total)}. Check it and open the job.` });
+  };
   const set = <K extends keyof typeof blank>(k: K, v: (typeof blank)[K]) => setF(p => ({ ...p, [k]: v }));
 
   const route = useMemo(
@@ -86,6 +113,7 @@ function NewOrderForm({ onDone, from }: { onDone: () => void; from?: Order }) {
       fulfilment: f.fulfilment,
       address: f.fulfilment === "delivery" ? f.address.trim() : undefined,
       notes: f.notes.trim() || undefined,
+      odooRef: odooRef.trim() || undefined,
     });
     if (from) convertEnquiry(from.id);
     toast.success(`Job card ${o.id} opened`, {
@@ -113,6 +141,38 @@ function NewOrderForm({ onDone, from }: { onDone: () => void; from?: Order }) {
         </div>
         <Btn variant="ghost" size="sm" onClick={onDone}>Close</Btn>
       </div>
+
+      {!from && (
+        <div className="mb-5 rounded-xl border bg-[color-mix(in_oklch,var(--muted)_50%,white)] p-4">
+          <p className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground">
+            Already quoted in Odoo?
+          </p>
+          <p className="mt-1 text-[12.5px] text-muted-foreground">
+            Put the quotation number in and the whole form fills itself. Nothing gets typed twice.
+          </p>
+          <div className="mt-3 flex flex-wrap gap-2">
+            <input
+              className={cn(inputCls, "w-full sm:w-56")} value={quoteBox}
+              onChange={e => setQuoteBox(e.target.value)}
+              onKeyDown={e => e.key === "Enter" && pullFromOdoo(quoteBox)}
+              placeholder="SO-2026-1806"
+            />
+            <Btn variant="soft" disabled={pulling || !quoteBox.trim()} onClick={() => pullFromOdoo(quoteBox)}>
+              {pulling ? "Looking…" : "Pull from Odoo"}
+            </Btn>
+            {odooRef && <Chip tone="ok">linked to {odooRef}</Chip>}
+          </div>
+          <div className="mt-3 flex flex-wrap items-center gap-1.5">
+            <span className="text-[11.5px] text-muted-foreground">Accepted quotations:</span>
+            {openQuotes().slice(0, 5).map(q => (
+              <button
+                key={q.ref} type="button" onClick={() => pullFromOdoo(q.ref)}
+                className="rounded-md border bg-card px-2 py-0.5 font-mono text-[11.5px] hover:bg-muted"
+              >{q.ref}</button>
+            ))}
+          </div>
+        </div>
+      )}
 
       <div className="grid gap-4 md:grid-cols-3">
         <Field label="Customer"><input className={inputCls} value={f.customer} onChange={e => set("customer", e.target.value)} placeholder="Gaborone Secondary School" /></Field>
@@ -353,7 +413,7 @@ export default function Ops() {
           {shown.map(o => (
             <JobCard key={o.id} order={o} onClick={() => nav(`/client?job=${o.id}`)}>
               <StateBadge order={o} />
-              {o.odooSynced && <Chip tone="muted" className="font-mono">{o.odooRef}</Chip>}
+              {o.odooRef && <Chip tone="muted" className="font-mono">{o.odooRef}</Chip>}
             </JobCard>
           ))}
         </div>

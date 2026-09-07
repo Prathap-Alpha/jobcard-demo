@@ -172,7 +172,7 @@ export default function Client() {
               <Row k="Artwork" v={order.artwork === "in_house" ? "We designed it" : "Client supplied"} />
               <Row k="Changes used" v={`${order.revisionsUsed} (${FREE_REVISIONS} free)`} />
               <Row k="Odoo reference" v={order.odooRef} mono />
-              <Row k="Odoo sync" v={order.odooSynced ? "In step" : "Pending"} />
+              <Row k="Invoiced in Odoo" v={order.odooSynced ? "Yes" : "Not yet"} />
             </dl>
             <div className="mt-5 flex flex-wrap gap-2 border-t pt-4">
               {DEPTS.map(d => {

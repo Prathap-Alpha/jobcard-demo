@@ -99,19 +99,18 @@ Whichever it is, it is a one-line change to the routes.
 
 Written down because an email to the client claimed all 13 were, which was wrong.
 
-**Proof of payment is not handled at all.** They share payment slips in a WhatsApp
-group today. Accounts records a payment by typing an amount with nothing attached
-to it. For a shop that takes a deposit on most jobs this is the biggest missing
-piece, and it is the one they will notice first.
+**BUILT since.** Proof of payment, the Odoo link and the overdue recommendation are
+all now in. What remains of these three:
 
-**Odoo is referenced, not connected.** Every job carries a quotation number and a
-sync state, but nothing reads from or writes to Odoo.
+**Odoo runs against a stand-in.** Every screen, state and failure path is real, but
+`lookupQuote` and `pushToOdoo` in `client/src/lib/odoo.ts` answer from a sample
+quotation book rather than calling Odoo. A browser cannot hold an Odoo API key.
+When the shop's supplier issues one it is kept on the server and those two
+functions become one server call each. Nothing else changes.
+
+**Payment slips live in the browser.** They are held as data inside localStorage and
+capped at 400KB each, which is fine for a demo and wrong for a real shop. In the
+real build a slip is a file on the server against the payment.
 
 **No cost guidance was given.** They asked what a system like this typically costs.
 Pricing sits with Tlotlo, but the question has not been answered by anyone.
-
-Point 10 is half done: automatic overdue chasing is built and de-duplicated, but
-they invited a recommendation on whether that is the right approach. Ours, now sent
-to them: the manager gets a morning list and approves each chase, because a large
-share of late jobs are late waiting on the customer's own approval and apologising
-to that customer automatically trains them to ignore the messages.

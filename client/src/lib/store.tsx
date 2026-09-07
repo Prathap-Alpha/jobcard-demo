@@ -3,8 +3,9 @@ import React, { createContext, useCallback, useContext, useEffect, useMemo, useS
 import {
   EXTRA_REVISION_FEE, FREE_REVISIONS, balanceOf, buildStages, currentStage, deptById,
   downstreamOfDesign, isComplete, isOverdue, normaliseRoute, orderTypeById, proofIsOut,
-  routeIsValid, stageUnlocked, withDesignIfNeeded, type DeptId, type Order,
+  routeIsValid, stageUnlocked, withDesignIfNeeded, type DeptId, type Order, type Payment,
 } from "./domain";
+import { pushToOdoo, type SyncState } from "./odoo";
 import { compose, type Channel, type Message, type MessageKind } from "./messages";
 import { SEED } from "./seed";
 
@@ -30,6 +31,8 @@ interface Snapshot {
 
 export interface NewOrder {
   enquiry?: boolean;
+  /** Set when the job was pulled from an existing Odoo quotation. */
+  odooRef?: string;
   customer: string; contact: string; email: string;
   type: Order["type"]; description: string; qty: number;
   route: DeptId[]; artwork: Order["artwork"];
@@ -45,11 +48,16 @@ interface Store extends Snapshot {
   finishStage: (orderId: string, dept: DeptId, who: string) => void;
   approveDesign: (orderId: string) => void;
   requestChanges: (orderId: string, note: string) => void;
-  takePayment: (orderId: string, amount: number) => void;
+  takePayment: (
+    orderId: string, amount: number,
+    extra?: { method?: Payment["method"]; slip?: Payment["slip"]; takenBy?: string },
+  ) => void;
   dispatchOrder: (orderId: string, driver: string) => void;
   markDelivered: (orderId: string) => void;
   markCollected: (orderId: string) => void;
   chaseOverdue: () => number;
+  chaseOne: (orderId: string) => void;
+  sendToOdoo: (orderId: string) => Promise<{ ok: boolean; message: string }>;
   convertEnquiry: (orderId: string) => void;
   acknowledge: (dept: DeptId) => void;
   reset: () => void;
@@ -140,9 +148,11 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     );
     const order: Order = {
       id: nextJobNumber(snapRef.current.orders),
-      // The seeded day uses SO-2026-1403..1472, so start above it.
-      odooRef: d.enquiry ? "" : `SO-2026-${2000 + Math.floor(Math.random() * 900)}`,
-      odooSynced: d.enquiry ? false : true,
+      // A job pulled from Odoo keeps the real quotation number. Otherwise the
+      // shop raises it in Odoo afterwards, so it starts with none.
+      // (The seeded day uses SO-2026-1403..1472.)
+      odooRef: d.odooRef ?? "",
+      odooSynced: false,
       enquiry: d.enquiry,
       customer: d.customer, contact: d.contact, email: d.email,
       type: d.type, description: d.description, qty: d.qty,
@@ -288,11 +298,37 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
    * total loses the difference with no record of it anywhere, which is the one
    * thing an accounts desk must never do.
    */
-  const takePayment = useCallback((orderId: string, amount: number) => {
+  const takePayment = useCallback((
+    orderId: string, amount: number,
+    extra?: { method?: Payment["method"]; slip?: Payment["slip"]; takenBy?: string },
+  ) => {
     if (Number.isFinite(amount) === false || amount <= 0) return;
     mutate(orderId,
-      o => amount > balanceOf(o) ? o : ({ ...o, deposit: o.deposit + amount }),
-      (s, o) => ({ ...s, events: log(s, o.id, "Accounts", `Payment recorded. Account now at ${o.deposit} of ${o.total}`) }));
+      o => amount > balanceOf(o) ? o : ({
+        ...o,
+        deposit: o.deposit + amount,
+        payments: [{
+          id: nid("pay"), amount, at: Date.now(),
+          takenBy: extra?.takenBy ?? "Keneilwe",
+          method: extra?.method ?? "cash",
+          slip: extra?.slip,
+        }, ...(o.payments ?? [])],
+      }),
+      (s, o) => ({
+        ...s,
+        events: log(s, o.id, "Accounts",
+          `${o.payments?.[0]?.method ?? "cash"} payment recorded${o.payments?.[0]?.slip ? " with a slip attached" : ""}. Account now at ${o.deposit} of ${o.total}`),
+      }));
+  }, [mutate]);
+
+  /** Raise the invoice in Odoo. One server call in the real build. */
+  const sendToOdoo = useCallback(async (orderId: string) => {
+    const o = snapRef.current.orders.find(x => x.id === orderId);
+    if (!o) return { ok: false, message: "No such job." };
+    const res = await pushToOdoo(o.odooRef);
+    mutate(orderId, x => ({ ...x, odooSynced: res.ok }),
+      (s, x) => ({ ...s, events: log(s, x.id, "Accounts", res.message) }));
+    return res;
   }, [mutate]);
 
   const dispatchOrder = useCallback((orderId: string, driver: string) => {
@@ -367,6 +403,20 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     patch(s => ({ ...s, orders: s.orders.filter(o => o.id !== orderId) }));
   }, [patch]);
 
+  /**
+   * Chase ONE customer, because the manager decided to. Replaces firing messages
+   * at everybody: most late jobs are late waiting on the customer's own approval,
+   * and apologising to them for that reads badly.
+   */
+  const chaseOne = useCallback((orderId: string) => {
+    mutate(orderId, o => ({ ...o }),
+      (s, o) => ({
+        ...s,
+        messages: notify(s, o, "overdue_reminder"),
+        events: log(s, o.id, "Front desk", "Customer chased about the delay"),
+      }));
+  }, [mutate, notify]);
+
   const acknowledge = useCallback((dept: DeptId) => {
     patch(s => (s.unseen[dept]?.length ? { ...s, unseen: { ...s.unseen, [dept]: [] } } : s));
   }, [patch]);
@@ -382,11 +432,11 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
 
   const value = useMemo<Store>(() => ({
     ...snap, createOrder, claimStage, finishStage, approveDesign, requestChanges,
-    takePayment, dispatchOrder, markDelivered, markCollected, chaseOverdue, convertEnquiry,
-    acknowledge, reset,
+    takePayment, dispatchOrder, markDelivered, markCollected, chaseOverdue, chaseOne,
+    sendToOdoo, convertEnquiry, acknowledge, reset,
   }), [snap, createOrder, claimStage, finishStage, approveDesign, requestChanges,
-    takePayment, dispatchOrder, markDelivered, markCollected, chaseOverdue, convertEnquiry,
-    acknowledge, reset]);
+    takePayment, dispatchOrder, markDelivered, markCollected, chaseOverdue, chaseOne,
+    sendToOdoo, convertEnquiry, acknowledge, reset]);
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }

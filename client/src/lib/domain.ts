@@ -66,6 +66,17 @@ export type Approval = "not_required" | "pending" | "approved" | "changes_reques
 export type Fulfilment = "collection" | "delivery";
 export type DeliveryStage = "not_started" | "packed" | "out_for_delivery" | "delivered";
 
+/** Money taken, and the slip the customer produced for it. */
+export interface Payment {
+  id: string;
+  amount: number;
+  at: number;
+  takenBy: string;
+  method: "cash" | "card" | "eft" | "cheque";
+  /** The proof of payment image, as the customer sent it. Optional: cash has none. */
+  slip?: { name: string; dataUrl: string };
+}
+
 export interface Order {
   id: string;               // JC-2609-014
   /**
@@ -76,6 +87,8 @@ export interface Order {
   enquiry?: boolean;
   odooRef: string;          // quotation / invoice reference already living in Odoo
   odooSynced: boolean;
+  /** Every payment taken against this job, newest first. */
+  payments?: Payment[];
   customer: string;
   contact: string;          // phone
   email: string;
@@ -148,6 +161,24 @@ export const isDebtor = (o: Order) =>
   (o.collectedAt !== undefined || o.delivery === "delivered") && balanceOf(o) > 0;
 
 /** Nothing has been promised on an enquiry, so it can never be late. */
+/**
+ * Why a job is late. A shop chasing its own customer for a delay the customer
+ * caused trains that customer to ignore the messages, so the two are separated.
+ */
+export type Holder =
+  | { who: "customer"; reason: string }
+  | { who: "us"; reason: string };
+
+export const heldBy = (o: Order): Holder => {
+  if (proofIsOut(o)) return { who: "customer", reason: "has not approved the proof yet" };
+  const st = currentStage(o);
+  if (!st) return { who: "us", reason: "finished, waiting to be collected" };
+  if (st.status === "in_progress") {
+    return { who: "us", reason: `on ${st.assignee ?? "the bench"} in ${deptById(st.dept).name}` };
+  }
+  return { who: "us", reason: `sitting in the ${deptById(st.dept).name} queue` };
+};
+
 export const isOverdue = (o: Order, now = Date.now()) =>
   o.enquiry === true ? false : _isOverdue(o, now);
 

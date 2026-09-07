@@ -215,6 +215,8 @@ const NAV = [
   { href: "/floor", label: "Department screens" },
   { href: "/board", label: "Job board" },
   { href: "/accounts", label: "Accounts" },
+  { href: "/overdue", label: "Overdue desk" },
+  { href: "/odoo", label: "Odoo" },
   { href: "/client", label: "Customer view" },
   { href: "/comms", label: "Messages sent" },
 ];

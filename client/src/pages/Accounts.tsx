@@ -2,7 +2,8 @@ import { useMemo, useState } from "react";
 import { toast } from "sonner";
 import { Btn, Chip, Empty, JobCard, PageHead, SectionTitle, Shell, Stat } from "@/components/jc";
 import {
-  balanceOf, fmtP, isComplete, isDebtor, orderTypeById, stageUnlocked, type Order,
+  balanceOf, fmtP, isComplete, isDebtor, orderTypeById, stageUnlocked,
+  type Order, type Payment,
 } from "@/lib/domain";
 import { useStore } from "@/lib/store";
 
@@ -28,6 +29,8 @@ export default function Accounts() {
   const debtors = orders.filter(o => !o.enquiry && isDebtor(o));
   const owed = live.reduce((s, o) => s + balanceOf(o), 0) + debtors.reduce((s, o) => s + balanceOf(o), 0);
   const takenToday = orders.filter(o => !o.enquiry).reduce((s, o) => s + o.deposit, 0);
+  // A payment with no slip behind it is what the WhatsApp group was doing badly.
+  const noSlip = orders.flatMap(o => o.payments ?? []).filter(p => !p.slip && p.method !== "cash").length;
 
   return (
     <Shell>
@@ -42,7 +45,10 @@ export default function Accounts() {
           hint={debtors.length ? `Includes ${fmtP(debtors.reduce((s, o) => s + balanceOf(o), 0))} on ${debtors.length} job${debtors.length > 1 ? "s" : ""} already handed over` : "Across all live jobs"}
           tone={owed > 0 ? "warn" : undefined}
         />
-        <Stat label="Taken so far" value={fmtP(takenToday)} hint="Deposits and settlements" tone="ok" />
+        <Stat
+          label="Taken so far" value={fmtP(takenToday)} tone="ok"
+          hint={noSlip > 0 ? `${noSlip} payment${noSlip > 1 ? "s" : ""} with no slip on file` : "Deposits and settlements"}
+        />
         <Stat label="At this desk" value={atAccounts.length} hint="Waiting to be released" />
         <Stat label="Out for delivery" value={onTheRoad.length} hint="With a driver right now" />
       </div>
@@ -198,10 +204,42 @@ function SendOutBtn({ order, onSend, driver }: { order: Order; onSend: () => voi
   );
 }
 
-function AccountRow({ o, onPay, onRelease }: { o: Order; onPay: (id: string, amt: number) => void; onRelease: () => void }) {
+/** Slips are held in the browser, so keep them small. */
+const MAX_SLIP_KB = 400;
+
+function readSlip(file: File): Promise<Payment["slip"]> {
+  return new Promise((resolve, reject) => {
+    if (file.size > MAX_SLIP_KB * 1024) {
+      reject(new Error(`That file is ${Math.round(file.size / 1024)}KB. Please keep a slip under ${MAX_SLIP_KB}KB.`));
+      return;
+    }
+    const r = new FileReader();
+    r.onload = () => resolve({ name: file.name, dataUrl: String(r.result) });
+    r.onerror = () => reject(new Error("Could not read that file."));
+    r.readAsDataURL(file);
+  });
+}
+
+function AccountRow({ o, onPay, onRelease }: {
+  o: Order;
+  onPay: (id: string, amt: number, extra?: { method?: Payment["method"]; slip?: Payment["slip"] }) => void;
+  onRelease: () => void;
+}) {
   const [amt, setAmt] = useState("");
+  const [method, setMethod] = useState<Payment["method"]>("cash");
+  const [slip, setSlip] = useState<Payment["slip"]>();
   const bal = balanceOf(o);
   const ready = o.stages.filter(s => s.dept !== "accounts").every(s => s.status === "done");
+
+  const pickSlip = async (file?: File) => {
+    if (!file) return;
+    try {
+      setSlip(await readSlip(file));
+      toast.success("Slip attached", { description: file.name });
+    } catch (e) {
+      toast.error("Could not attach that", { description: (e as Error).message });
+    }
+  };
   return (
     <div className="rounded-xl border bg-card p-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -215,22 +253,60 @@ function AccountRow({ o, onPay, onRelease }: { o: Order; onPay: (id: string, amt
           <p className="text-[11px] text-muted-foreground">of {fmtP(o.total)} owing</p>
         </div>
       </div>
+      {(o.payments?.length ?? 0) > 0 && (
+        <div className="mt-3 flex flex-wrap gap-2 border-t pt-3">
+          {o.payments!.map(pay => (
+            <span key={pay.id} className="inline-flex items-center gap-2 rounded-lg border bg-background px-2 py-1 text-[11.5px]">
+              <span className="tnum font-semibold">{fmtP(pay.amount)}</span>
+              <span className="text-muted-foreground">{pay.method}</span>
+              {pay.slip
+                ? <a href={pay.slip.dataUrl} target="_blank" rel="noreferrer" className="font-semibold underline underline-offset-2">slip</a>
+                : <span className="text-muted-foreground/60">no slip</span>}
+            </span>
+          ))}
+        </div>
+      )}
+
       <div className="mt-3.5 flex flex-wrap items-center gap-2 border-t pt-3.5">
         <input
           value={amt} onChange={e => setAmt(e.target.value)} inputMode="decimal" placeholder="Amount received"
           className="h-8 w-full rounded-lg border bg-background px-2.5 text-[13px] outline-none focus:ring-2 focus:ring-ring sm:w-36"
         />
+        <select
+          value={method} onChange={e => setMethod(e.target.value as Payment["method"])}
+          className="h-8 rounded-lg border bg-background px-2 text-[13px] outline-none focus:ring-2 focus:ring-ring"
+        >
+          <option value="cash">Cash</option>
+          <option value="card">Card</option>
+          <option value="eft">EFT</option>
+          <option value="cheque">Cheque</option>
+        </select>
+        <label className="inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-lg border bg-background px-2.5 text-[12.5px] font-medium hover:bg-muted">
+          {slip ? "Slip attached" : "Attach slip"}
+          <input type="file" accept="image/*,.pdf" className="hidden" onChange={e => pickSlip(e.target.files?.[0])} />
+        </label>
+        {slip && (
+          <button type="button" onClick={() => setSlip(undefined)} className="text-[11.5px] text-muted-foreground underline">
+            remove
+          </button>
+        )}
         <Btn
           size="sm" variant="soft"
           disabled={!(Number(amt) > 0) || Number(amt) > bal}
           title={Number(amt) > bal ? `That is more than the ${fmtP(bal)} owing` : undefined}
-          onClick={() => { onPay(o.id, Number(amt)); setAmt(""); toast.success(`${fmtP(Number(amt))} recorded on ${o.id}`); }}
+          onClick={() => {
+            onPay(o.id, Number(amt), { method, slip });
+            toast.success(`${fmtP(Number(amt))} recorded on ${o.id}`, {
+              description: slip ? "Slip filed against the job." : "No slip attached.",
+            });
+            setAmt(""); setSlip(undefined);
+          }}
         >
           Record payment
         </Btn>
         {Number(amt) > bal && <span className="text-[11.5px] font-medium" style={{ color: "var(--late)" }}>more than the {fmtP(bal)} owing</span>}
         {bal > 0 && (
-          <Btn size="sm" variant="ghost" onClick={() => { onPay(o.id, bal); toast.success(`${o.id} settled in full`); }}>
+          <Btn size="sm" variant="ghost" onClick={() => { onPay(o.id, bal, { method, slip }); setSlip(undefined); toast.success(`${o.id} settled in full`); }}>
             Settle {fmtP(bal)}
           </Btn>
         )}
