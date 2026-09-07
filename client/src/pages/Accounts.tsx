@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import { toast } from "sonner";
 import { Btn, Chip, Empty, JobCard, PageHead, SectionTitle, Shell, Stat } from "@/components/jc";
 import {
-  balanceOf, fmtP, isComplete, orderTypeById, stageUnlocked, type Order,
+  balanceOf, fmtP, isComplete, isDebtor, orderTypeById, stageUnlocked, type Order,
 } from "@/lib/domain";
 import { useStore } from "@/lib/store";
 
@@ -24,7 +24,9 @@ export default function Accounts() {
   const toDeliver = live.filter(o => isComplete(o) && o.fulfilment === "delivery" && o.delivery === "packed");
   const onTheRoad = live.filter(o => o.delivery === "out_for_delivery");
 
-  const owed = live.reduce((s, o) => s + balanceOf(o), 0);
+  // Money owed does not disappear because the goods left the building.
+  const debtors = orders.filter(o => isDebtor(o));
+  const owed = live.reduce((s, o) => s + balanceOf(o), 0) + debtors.reduce((s, o) => s + balanceOf(o), 0);
   const takenToday = orders.reduce((s, o) => s + o.deposit, 0);
 
   return (
@@ -35,7 +37,11 @@ export default function Accounts() {
       />
 
       <div className="mb-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <Stat label="Outstanding" value={fmtP(owed)} hint="Across all live jobs" tone={owed > 0 ? "warn" : undefined} />
+        <Stat
+          label="Outstanding" value={fmtP(owed)}
+          hint={debtors.length ? `Includes ${fmtP(debtors.reduce((s, o) => s + balanceOf(o), 0))} on ${debtors.length} job${debtors.length > 1 ? "s" : ""} already handed over` : "Across all live jobs"}
+          tone={owed > 0 ? "warn" : undefined}
+        />
         <Stat label="Taken so far" value={fmtP(takenToday)} hint="Deposits and settlements" tone="ok" />
         <Stat label="At this desk" value={atAccounts.length} hint="Waiting to be released" />
         <Stat label="Out for delivery" value={onTheRoad.length} hint="With a driver right now" />
@@ -65,9 +71,7 @@ export default function Accounts() {
                     {balanceOf(o) > 0
                       ? <Chip tone="warn">{fmtP(balanceOf(o))} on collection</Chip>
                       : <Chip tone="ok">paid in full</Chip>}
-                    <Btn size="sm" onClick={() => { markCollected(o.id); toast.success(`${o.id} collected`); }}>
-                      Collected
-                    </Btn>
+                    <CollectBtn order={o} onCollect={() => { markCollected(o.id); }} />
                   </JobCard>
                 ))}
             </div>
@@ -113,6 +117,23 @@ export default function Accounts() {
   );
 }
 
+/** Letting goods out with money owing needs a second, deliberate press. */
+function CollectBtn({ order, onCollect }: { order: Order; onCollect: () => void }) {
+  const [armed, setArmed] = useState(false);
+  const bal = balanceOf(order);
+  if (bal === 0) {
+    return <Btn size="sm" onClick={() => { onCollect(); toast.success(`${order.id} collected`); }}>Collected</Btn>;
+  }
+  if (!armed) {
+    return <Btn size="sm" variant="soft" onClick={() => setArmed(true)}>Collected</Btn>;
+  }
+  return (
+    <Btn size="sm" variant="danger" onClick={() => { onCollect(); toast.warning(`${order.id} left with ${fmtP(bal)} owing`, { description: "It is now on the debtors list." }); }}>
+      Let it go, {fmtP(bal)} owing
+    </Btn>
+  );
+}
+
 function AccountRow({ o, onPay, onRelease }: { o: Order; onPay: (id: string, amt: number) => void; onRelease: () => void }) {
   const [amt, setAmt] = useState("");
   const bal = balanceOf(o);
@@ -135,9 +156,15 @@ function AccountRow({ o, onPay, onRelease }: { o: Order; onPay: (id: string, amt
           value={amt} onChange={e => setAmt(e.target.value)} inputMode="decimal" placeholder="Amount received"
           className="h-8 w-full rounded-lg border bg-background px-2.5 text-[13px] outline-none focus:ring-2 focus:ring-ring sm:w-36"
         />
-        <Btn size="sm" variant="soft" disabled={!Number(amt)} onClick={() => { onPay(o.id, Number(amt)); setAmt(""); toast.success(`${fmtP(Number(amt))} recorded on ${o.id}`); }}>
+        <Btn
+          size="sm" variant="soft"
+          disabled={!Number(amt) || Number(amt) > bal}
+          title={Number(amt) > bal ? `That is more than the ${fmtP(bal)} owing` : undefined}
+          onClick={() => { onPay(o.id, Number(amt)); setAmt(""); toast.success(`${fmtP(Number(amt))} recorded on ${o.id}`); }}
+        >
           Record payment
         </Btn>
+        {Number(amt) > bal && <span className="text-[11.5px] font-medium" style={{ color: "var(--late)" }}>more than the {fmtP(bal)} owing</span>}
         {bal > 0 && (
           <Btn size="sm" variant="ghost" onClick={() => { onPay(o.id, bal); toast.success(`${o.id} settled in full`); }}>
             Settle {fmtP(bal)}

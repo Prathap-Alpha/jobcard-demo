@@ -3,6 +3,7 @@ import { Toaster } from "@/components/ui/sonner";
 import ErrorBoundary from "./components/ErrorBoundary";
 import { StoreProvider } from "./lib/store";
 import Home from "./pages/Home";
+import Demo from "./pages/Demo";
 import Ops from "./pages/Ops";
 import Dept, { Floor } from "./pages/Dept";
 import Board from "./pages/Board";
@@ -22,6 +23,7 @@ export default function App() {
         <WouterRouter base={BASE}>
           <Switch>
             <Route path="/" component={Home} />
+            <Route path="/demo" component={Demo} />
             <Route path="/ops" component={Ops} />
             <Route path="/floor" component={Floor} />
             <Route path="/floor/:id" component={Dept} />

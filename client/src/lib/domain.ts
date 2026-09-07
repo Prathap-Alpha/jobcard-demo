@@ -137,6 +137,10 @@ export const downstreamOfDesign = (o: Order): DeptId[] => {
   return i < 0 ? [] : o.route.slice(i + 1);
 };
 
+/** Handed to the customer but not paid in full. The debt outlives the job. */
+export const isDebtor = (o: Order) =>
+  (o.collectedAt !== undefined || o.delivery === "delivered") && balanceOf(o) > 0;
+
 export const isOverdue = (o: Order, now = Date.now()) =>
   !isComplete(o) && now > o.dueAt;
 

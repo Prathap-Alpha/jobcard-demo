@@ -60,6 +60,8 @@ function NewOrderForm({ onDone }: { onDone: () => void }) {
   if (!f.description.trim()) problems.push("a job description");
   if (total <= 0) problems.push("a job total");
   if (deposit > total) problems.push("a deposit no bigger than the total");
+  if (total < 0 || deposit < 0) problems.push("amounts that are not negative");
+  if ((Number(f.due) || 0) <= 0) problems.push("a ready-by time in the future");
   if (f.fulfilment === "delivery" && !f.address.trim()) problems.push("a delivery address");
 
   const submit = () => {
@@ -236,7 +238,7 @@ export default function Ops() {
     { id: "all", label: "Everything", n: orders.length },
   ];
 
-  const owed = orders.filter(o => !o.collectedAt).reduce((s, o) => s + balanceOf(o), 0);
+  const owed = orders.reduce((s, o) => s + balanceOf(o), 0);
 
   return (
     <Shell>

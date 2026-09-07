@@ -225,7 +225,12 @@ export function Shell({ children, wide = false }: { children: React.ReactNode; w
     <div className="min-h-screen bg-background">
       <header className="sticky top-0 z-40 border-b bg-[oklch(0.185_0.012_262)] text-[oklch(0.93_0.006_260)]">
         <div className={cn("mx-auto flex h-14 items-center gap-6 px-5", wide ? "max-w-none" : "max-w-[1400px]")}>
-          <Link href="/" className="shrink-0 text-white"><Mark /></Link>
+          <Link href="/" className="flex shrink-0 items-center gap-2.5 text-white" title="Back to the Pula Printers website">
+            <Mark />
+            <span className="hidden border-l border-white/20 pl-2.5 text-[12.5px] font-medium text-white/50 xl:inline">
+              Pula Printers
+            </span>
+          </Link>
           <nav className="flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto">
             {NAV.map(n => {
               const on = loc === n.href || loc.startsWith(`${n.href}/`);

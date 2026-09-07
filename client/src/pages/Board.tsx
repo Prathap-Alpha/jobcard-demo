@@ -49,6 +49,11 @@ export default function Board() {
           <div className="grid gap-3 md:grid-cols-2">
             {running.length === 0 && <p className="text-white/40">Nothing in production.</p>}
             {running.slice(0, 12).map(o => <BoardRow key={o.id} o={o} now={now} />)}
+            {running.length > 12 && (
+              <p className="self-center px-4 py-2 text-[13px] text-white/40 md:col-span-2">
+                and {running.length - 12} more on the floor
+              </p>
+            )}
           </div>
         </section>
 

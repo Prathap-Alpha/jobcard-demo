@@ -4,7 +4,7 @@ import { toast } from "sonner";
 import { Btn, Chip, DeptDot, Empty, Mark, PageHead, Shell, StateBadge } from "@/components/jc";
 import {
   DEPTS, EXTRA_REVISION_FEE, FREE_REVISIONS, STATE_LABEL, balanceOf, currentDept, deptById,
-  fmtDue, fmtP, isOverdue, orderState, orderTypeById, type Order,
+  fmtDue, fmtP, isOverdue, orderState, orderTypeById, proofIsOut, type Order,
 } from "@/lib/domain";
 import { useStore } from "@/lib/store";
 import { cn } from "@/lib/utils";
@@ -29,7 +29,8 @@ export default function Client() {
   const bal = balanceOf(order);
   const here = currentDept(order);
   const trail = events.filter(e => e.orderId === order.id).slice(0, 8);
-  const needsApproval = order.approval === "pending" || order.approval === "changes_requested";
+  // Only once Design has actually sent something. Before that there is nothing to approve.
+  const needsApproval = proofIsOut(order);
   const freeLeft = Math.max(0, FREE_REVISIONS - order.revisionsUsed);
 
   return (

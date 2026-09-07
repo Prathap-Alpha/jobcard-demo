@@ -1,9 +1,9 @@
 /* eslint-disable react-refresh/only-export-components */
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import {
-  EXTRA_REVISION_FEE, FREE_REVISIONS, buildStages, currentStage, deptById, downstreamOfDesign,
-  isComplete, isOverdue, normaliseRoute, orderTypeById, proofIsOut, routeIsValid, stageUnlocked,
-  withDesignIfNeeded, type DeptId, type Order,
+  EXTRA_REVISION_FEE, FREE_REVISIONS, balanceOf, buildStages, currentStage, deptById,
+  downstreamOfDesign, isComplete, isOverdue, normaliseRoute, orderTypeById, proofIsOut,
+  routeIsValid, stageUnlocked, withDesignIfNeeded, type DeptId, type Order,
 } from "./domain";
 import { compose, type Channel, type Message, type MessageKind } from "./messages";
 import { SEED } from "./seed";
@@ -229,11 +229,20 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   const approveDesign = useCallback((orderId: string) => {
     mutate(orderId,
       o => proofIsOut(o) === false ? o : ({ ...o, approval: "approved" as const }),
-      (s, o) => ({
-        ...s,
-        messages: notify(s, o, "in_production"),
-        events: log(s, o.id, o.customer, "Client approved the proof"),
-      }));
+      (s, o) => {
+        const next: Snapshot = {
+          ...s,
+          messages: notify(s, o, "in_production"),
+          events: log(s, o.id, o.customer, "Client approved the proof"),
+        };
+        // The sign-off is what releases the next room, so that is when its
+        // screen must light up. Nothing told it before this.
+        const nxt = currentStage(o);
+        if (nxt && stageUnlocked(o, nxt.dept)) {
+          return { ...next, unseen: { ...next.unseen, [nxt.dept]: [o.id, ...(next.unseen[nxt.dept] ?? [])] } };
+        }
+        return next;
+      });
   }, [mutate, notify]);
 
   const requestChanges = useCallback((orderId: string, note: string) => {
@@ -266,9 +275,15 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     });
   }, [mutate, notify]);
 
+  /**
+   * Refuses more than the job is worth. Quietly clipping an overpayment to the
+   * total loses the difference with no record of it anywhere, which is the one
+   * thing an accounts desk must never do.
+   */
   const takePayment = useCallback((orderId: string, amount: number) => {
     if (Number.isFinite(amount) === false || amount <= 0) return;
-    mutate(orderId, o => ({ ...o, deposit: Math.min(o.total, o.deposit + amount) }),
+    mutate(orderId,
+      o => amount > balanceOf(o) ? o : ({ ...o, deposit: o.deposit + amount }),
       (s, o) => ({ ...s, events: log(s, o.id, "Accounts", `Payment recorded. Account now at ${o.deposit} of ${o.total}`) }));
   }, [mutate]);
 
@@ -317,7 +332,11 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         .filter(m => m.kind === "overdue_reminder" && m.sentAt > cutoff)
         .map(m => m.orderId),
     );
-    const due = snapRef.current.orders.filter(o => isOverdue(o, now) && chasedRecently.has(o.id) === false);
+    // A job sitting on the customer's own proof is late because of them, so an
+    // apology from us reads as nonsense. Those are left for the manager.
+    const due = snapRef.current.orders.filter(
+      o => isOverdue(o, now) && chasedRecently.has(o.id) === false && proofIsOut(o) === false,
+    );
     if (due.length === 0) return 0;
 
     const dueIds = new Set(due.map(o => o.id));
