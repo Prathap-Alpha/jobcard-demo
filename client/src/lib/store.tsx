@@ -1,8 +1,9 @@
 /* eslint-disable react-refresh/only-export-components */
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import {
-  EXTRA_REVISION_FEE, FREE_REVISIONS, buildStages, currentStage, deptById, isComplete,
-  isOverdue, orderTypeById, type DeptId, type Order,
+  EXTRA_REVISION_FEE, FREE_REVISIONS, buildStages, currentStage, deptById, downstreamOfDesign,
+  isComplete, isOverdue, normaliseRoute, orderTypeById, proofIsOut, routeIsValid, stageUnlocked,
+  withDesignIfNeeded, type DeptId, type Order,
 } from "./domain";
 import { compose, type Channel, type Message, type MessageKind } from "./messages";
 import { SEED } from "./seed";
@@ -71,8 +72,37 @@ function load(): Snapshot {
 const log = (s: Snapshot, orderId: string, who: string, text: string): Event[] =>
   [{ id: nid("ev"), orderId, at: Date.now(), who, text }, ...s.events];
 
+/** Six hours between automatic chases on the same job. */
+const CHASE_GAP = 6 * 3_600_000;
+
+/** A job number nothing on the board is already using. */
+function nextJobNumber(orders: Order[]): string {
+  const used = new Set(orders.map(o => o.id));
+  const highest = orders
+    .map(o => Number(o.id.split("-").pop()))
+    .filter(n => Number.isFinite(n))
+    .reduce((a, b) => Math.max(a, b), 100);
+  let n = highest + 1;
+  while (used.has(`JC-2609-${n}`)) n++;
+  return `JC-2609-${n}`;
+}
+
+/**
+ * The store refuses a move the floor should not be able to make, whatever the
+ * screen happens to offer: out of turn, or production before the client has
+ * signed the proof off.
+ */
+function workable(o: Order, dept: DeptId, requireStatus?: "queued") {
+  const st = o.stages.find(s => s.dept === dept);
+  if (st === undefined || st.status === "done") return false;
+  if (requireStatus !== undefined && st.status !== requireStatus) return false;
+  return stageUnlocked(o, dept);
+}
+
 export function StoreProvider({ children }: { children: React.ReactNode }) {
   const [snap, setSnap] = useState<Snapshot>(load);
+  const snapRef = React.useRef(snap);
+  snapRef.current = snap;
 
   useEffect(() => {
     try {
@@ -98,13 +128,19 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const createOrder = useCallback((d: NewOrder) => {
+    // Admin and Accounts can never be skipped, whoever calls this, and a job we
+    // design ourselves must stop at Design or it would wait forever for a proof.
+    const route = withDesignIfNeeded(
+      routeIsValid(d.route) ? d.route : normaliseRoute(d.route),
+      d.artwork,
+    );
     const order: Order = {
-      id: `JC-2609-${String(Math.floor(Math.random() * 900) + 100)}`,
+      id: nextJobNumber(snapRef.current.orders),
       odooRef: `SO-2026-${String(Math.floor(Math.random() * 9000) + 1000)}`,
       odooSynced: true,
       customer: d.customer, contact: d.contact, email: d.email,
       type: d.type, description: d.description, qty: d.qty,
-      route: d.route, stages: buildStages(d.route),
+      route, stages: buildStages(route),
       artwork: d.artwork,
       approval: d.artwork === "in_house" ? "pending" : "not_required",
       revisionsUsed: 0,
@@ -123,12 +159,18 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     return order;
   }, [patch, notify]);
 
+  /**
+   * Apply a change to one order. When the guard inside `fn` refuses the move it
+   * hands the same object straight back, and nothing else runs: no history line,
+   * and above all no message to a customer about something that did not happen.
+   */
   const mutate = useCallback(
     (orderId: string, fn: (o: Order) => Order, after?: (s: Snapshot, o: Order) => Snapshot) => {
       patch(s => {
         const i = s.orders.findIndex(o => o.id === orderId);
         if (i < 0) return s;
         const updated = fn(s.orders[i]);
+        if (updated === s.orders[i]) return s;
         const orders = [...s.orders];
         orders[i] = updated;
         const next = { ...s, orders };
@@ -138,7 +180,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
 
   const claimStage = useCallback((orderId: string, dept: DeptId, who: string) => {
     mutate(orderId,
-      o => ({
+      o => workable(o, dept, "queued") === false ? o : ({
         ...o,
         stages: o.stages.map(st =>
           st.dept === dept ? { ...st, status: "in_progress" as const, assignee: who, startedAt: Date.now() } : st),
@@ -148,7 +190,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
 
   const finishStage = useCallback((orderId: string, dept: DeptId, who: string) => {
     mutate(orderId,
-      o => ({
+      o => workable(o, dept) === false ? o : ({
         ...o,
         stages: o.stages.map(st =>
           st.dept === dept ? { ...st, status: "done" as const, assignee: st.assignee ?? who, finishedAt: Date.now() } : st),
@@ -157,11 +199,20 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         let next: Snapshot = { ...s, events: log(s, o.id, who, `${deptById(dept).name} finished`) };
         const nxt = currentStage(o);
         if (nxt) {
-          // The next department's screen lights up. That is the staff notification (rule 7).
-          next = { ...next, unseen: { ...next.unseen, [nxt.dept]: [o.id, ...(next.unseen[nxt.dept] ?? [])] } };
-          // Design finishing an in-house job means a proof is now waiting on the client.
-          if (dept === "design" && o.approval === "pending") {
-            next = { ...next, messages: notify(next, o, "proof_ready") };
+          // The next department's screen lights up, but only if it may actually
+          // start. A station held behind the client's sign-off is not told a job
+          // has landed, because it cannot touch it yet.
+          if (stageUnlocked(o, nxt.dept)) {
+            next = { ...next, unseen: { ...next.unseen, [nxt.dept]: [o.id, ...(next.unseen[nxt.dept] ?? [])] } };
+          }
+          // Design finishing an in-house job means a proof is waiting on the client.
+          // A revised proof comes back as "changes_requested", and must go out too.
+          if (dept === "design" && (o.approval === "pending" || o.approval === "changes_requested")) {
+            next = {
+              ...next,
+              orders: next.orders.map(x => x.id === o.id ? { ...x, approval: "pending" as const } : x),
+              messages: notify(next, { ...o, approval: "pending" }, "proof_ready"),
+            };
           }
         }
         if (isComplete(o)) {
@@ -176,7 +227,8 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   }, [mutate, notify]);
 
   const approveDesign = useCallback((orderId: string) => {
-    mutate(orderId, o => ({ ...o, approval: "approved" as const }),
+    mutate(orderId,
+      o => proofIsOut(o) === false ? o : ({ ...o, approval: "approved" as const }),
       (s, o) => ({
         ...s,
         messages: notify(s, o, "in_production"),
@@ -186,6 +238,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
 
   const requestChanges = useCallback((orderId: string, note: string) => {
     mutate(orderId, o => {
+      if (proofIsOut(o) === false) return o;
       const used = o.revisionsUsed + 1;
       const charged = used > FREE_REVISIONS;
       return {
@@ -193,8 +246,13 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         approval: "changes_requested" as const,
         revisionsUsed: used,
         total: charged ? o.total + EXTRA_REVISION_FEE : o.total,
-        // The job goes back to Design and that stage re-opens.
-        stages: o.stages.map(st => st.dept === "design" ? { ...st, status: "queued" as const, finishedAt: undefined } : st),
+        // Design re-opens, and anything already made from the old artwork goes
+        // back with it. Shipping work printed from a superseded proof is the
+        // exact failure this gate exists to prevent.
+        stages: o.stages.map(st =>
+          st.dept === "design" || downstreamOfDesign(o).includes(st.dept)
+            ? { ...st, status: "queued" as const, assignee: undefined, startedAt: undefined, finishedAt: undefined }
+            : st),
         notes: note ? `${note}${o.notes ? ` · ${o.notes}` : ""}` : o.notes,
       };
     }, (s, o) => {
@@ -209,12 +267,16 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   }, [mutate, notify]);
 
   const takePayment = useCallback((orderId: string, amount: number) => {
+    if (Number.isFinite(amount) === false || amount <= 0) return;
     mutate(orderId, o => ({ ...o, deposit: Math.min(o.total, o.deposit + amount) }),
       (s, o) => ({ ...s, events: log(s, o.id, "Accounts", `Payment recorded. Account now at ${o.deposit} of ${o.total}`) }));
   }, [mutate]);
 
   const dispatchOrder = useCallback((orderId: string, driver: string) => {
-    mutate(orderId, o => ({ ...o, delivery: "out_for_delivery" as const, driver }),
+    mutate(orderId,
+      o => (o.fulfilment !== "delivery" || isComplete(o) === false || o.delivery !== "packed")
+        ? o
+        : ({ ...o, delivery: "out_for_delivery" as const, driver }),
       (s, o) => ({
         ...s,
         messages: notify(s, o, "out_for_delivery"),
@@ -223,7 +285,8 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   }, [mutate, notify]);
 
   const markDelivered = useCallback((orderId: string) => {
-    mutate(orderId, o => ({ ...o, delivery: "delivered" as const }),
+    mutate(orderId,
+      o => o.delivery !== "out_for_delivery" ? o : ({ ...o, delivery: "delivered" as const }),
       (s, o) => ({
         ...s,
         messages: notify(s, o, "delivered"),
@@ -232,26 +295,44 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   }, [mutate, notify]);
 
   const markCollected = useCallback((orderId: string) => {
-    mutate(orderId, o => ({ ...o, collectedAt: Date.now() }),
+    mutate(orderId,
+      o => (o.fulfilment !== "collection" || isComplete(o) === false || o.collectedAt !== undefined)
+        ? o
+        : ({ ...o, collectedAt: Date.now() }),
       (s, o) => ({ ...s, events: log(s, o.id, "Front desk", "Collected by the customer") }));
   }, [mutate]);
 
-  /** Rule 10: chase every job that has run past its promised date, in one sweep. */
+  /**
+   * Rule 10: chase every job that has run past its promised date, in one sweep.
+   * A job is chased at most once every CHASE_GAP, so pressing the button twice
+   * does not text the same customer twice.
+   */
   const chaseOverdue = useCallback(() => {
-    let n = 0;
+    // Work out who is due a chase from the current snapshot, not inside the
+    // state updater, which React may run more than once.
+    const now = Date.now();
+    const cutoff = now - CHASE_GAP;
+    const chasedRecently = new Set(
+      snapRef.current.messages
+        .filter(m => m.kind === "overdue_reminder" && m.sentAt > cutoff)
+        .map(m => m.orderId),
+    );
+    const due = snapRef.current.orders.filter(o => isOverdue(o, now) && chasedRecently.has(o.id) === false);
+    if (due.length === 0) return 0;
+
+    const dueIds = new Set(due.map(o => o.id));
     patch(s => {
       let next = s;
-      for (const o of s.orders.filter(x => isOverdue(x))) {
+      for (const o of s.orders.filter(x => dueIds.has(x.id))) {
         next = {
           ...next,
           messages: notify(next, o, "overdue_reminder"),
           events: log(next, o.id, "Auto-reminder", "Overdue chase sent to the customer"),
         };
-        n++;
       }
       return next;
     });
-    return n;
+    return due.length;
   }, [patch, notify]);
 
   const acknowledge = useCallback((dept: DeptId) => {

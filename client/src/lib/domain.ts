@@ -131,6 +131,12 @@ export const stageUnlocked = (o: Order, dept: DeptId) => {
   return true;
 };
 
+/** Production stations that come after Design on this job's own route. */
+export const downstreamOfDesign = (o: Order): DeptId[] => {
+  const i = o.route.indexOf("design");
+  return i < 0 ? [] : o.route.slice(i + 1);
+};
+
 export const isOverdue = (o: Order, now = Date.now()) =>
   !isComplete(o) && now > o.dueAt;
 
@@ -139,11 +145,18 @@ export const hoursLeft = (o: Order, now = Date.now()) =>
 
 export type OrderState = "awaiting_approval" | "in_production" | "ready" | "out_for_delivery" | "closed";
 
+/**
+ * A job only counts as waiting on the client once Design has actually sent a
+ * proof. Before that it is still ours, sitting with Admin or Design.
+ */
+export const proofIsOut = (o: Order) =>
+  productionBlocked(o) && o.stages.some(s => s.dept === "design" && s.status === "done");
+
 export const orderState = (o: Order): OrderState => {
   if (o.collectedAt || o.delivery === "delivered") return "closed";
   if (o.delivery === "out_for_delivery") return "out_for_delivery";
   if (isComplete(o)) return "ready";
-  if (productionBlocked(o)) return "awaiting_approval";
+  if (proofIsOut(o)) return "awaiting_approval";
   return "in_production";
 };
 
@@ -159,13 +172,37 @@ export const STATE_LABEL: Record<OrderState, string> = {
 export const buildStages = (route: DeptId[]): Stage[] =>
   route.map(dept => ({ dept, status: "queued" as StageStatus }));
 
-/** Admin first, Accounts last, everything else in the agency's own order. */
+/**
+ * Admin first, Accounts last. The stations in between keep the order the
+ * Operations Manager ticked them in, because the client was explicit that there
+ * is no fixed sequence: one uniform may need embroidery before sewing, the next
+ * the other way round. Duplicates and unknown departments are dropped.
+ */
 export const normaliseRoute = (picked: DeptId[]): DeptId[] => {
-  const middle = DEPTS
-    .filter(d => !d.mandatory && picked.includes(d.id))
-    .map(d => d.id);
+  const optional = new Set(DEPTS.filter(d => !d.mandatory).map(d => d.id));
+  const middle: DeptId[] = [];
+  for (const d of picked) {
+    if (optional.has(d) && !middle.includes(d)) middle.push(d);
+  }
   return ["admin", ...middle, "accounts"];
 };
+
+/**
+ * If we are drawing the artwork, the job has to stop at Design, otherwise it
+ * would sit waiting for a proof that no station is ever asked to make.
+ */
+export const withDesignIfNeeded = (route: DeptId[], artwork: Artwork): DeptId[] =>
+  artwork === "in_house" && !route.includes("design")
+    ? ["admin", "design", ...route.slice(1)]
+    : route;
+
+/** True when a route is legal: Admin first, Accounts last, no repeats. */
+export const routeIsValid = (route: DeptId[]) =>
+  route.length >= 2 &&
+  route[0] === "admin" &&
+  route[route.length - 1] === "accounts" &&
+  new Set(route).size === route.length &&
+  route.every(d => DEPTS.some(x => x.id === d));
 
 export const fmtP = (n: number) =>
   `P${n.toLocaleString("en-BW", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;

@@ -104,8 +104,13 @@ export function StateBadge({ order }: { order: Order }) {
 /* ── the job card ─────────────────────────────────────────────────────────── */
 
 export function JobCard({
-  order, onClick, children, dense = false,
-}: { order: Order; onClick?: () => void; children?: React.ReactNode; dense?: boolean }) {
+  order, onClick, children, dense = false, showMoney = true,
+}: {
+  order: Order; onClick?: () => void; children?: React.ReactNode;
+  dense?: boolean;
+  /** Department screens never show what a job is worth (rule 5). */
+  showMoney?: boolean;
+}) {
   const here = currentDept(order);
   const bal = balanceOf(order);
   const stripe = here ? deptById(here).hue : "var(--ok)";
@@ -134,7 +139,9 @@ export function JobCard({
         </div>
         <div className="flex shrink-0 flex-col items-end gap-1.5">
           <DueBadge order={order} />
-          {bal > 0 && <span className="tnum text-[11px] font-semibold text-muted-foreground">{fmtP(bal)} owing</span>}
+          {showMoney && bal > 0 && (
+            <span className="tnum text-[11px] font-semibold text-muted-foreground">{fmtP(bal)} owing</span>
+          )}
         </div>
       </div>
       <div className={cn("flex items-center justify-between gap-3 border-t bg-[color-mix(in_oklch,var(--muted)_55%,white)] py-2", dense ? "px-3.5" : "px-4")}>

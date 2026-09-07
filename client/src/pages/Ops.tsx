@@ -6,7 +6,7 @@ import {
 } from "@/components/jc";
 import {
   DEPTS, ORDER_TYPES, balanceOf, deptById, fmtP, isComplete, isOverdue, normaliseRoute,
-  orderState, orderTypeById, type DeptId, type Order, type OrderTypeId,
+  orderState, orderTypeById, withDesignIfNeeded, type DeptId, type Order, type OrderTypeId,
 } from "@/lib/domain";
 import { useStore } from "@/lib/store";
 import { cn } from "@/lib/utils";
@@ -41,7 +41,10 @@ function NewOrderForm({ onDone }: { onDone: () => void }) {
   const [extra, setExtra] = useState<DeptId[]>(["design"]);
   const set = <K extends keyof typeof blank>(k: K, v: (typeof blank)[K]) => setF(p => ({ ...p, [k]: v }));
 
-  const route = useMemo(() => normaliseRoute(extra), [extra]);
+  const route = useMemo(
+     () => withDesignIfNeeded(normaliseRoute(extra), f.artwork),
+     [extra, f.artwork],
+   );
 
   const pickType = (id: OrderTypeId) => {
     set("type", id);
@@ -121,7 +124,9 @@ function NewOrderForm({ onDone }: { onDone: () => void }) {
         <Field label="Departments this job passes through" hint="Admin and Accounts are locked on every job. Tick only the stations this job actually needs.">
           <div className="flex flex-wrap gap-2">
             {DEPTS.map(d => {
-              const locked = d.mandatory;
+              // Admin and Accounts are always on, and Design is forced on when we
+              // are drawing the artwork: the proof has to come from somewhere.
+              const locked = d.mandatory || (d.id === "design" && f.artwork === "in_house");
               const on = locked || extra.includes(d.id);
               return (
                 <button
@@ -136,7 +141,11 @@ function NewOrderForm({ onDone }: { onDone: () => void }) {
                 >
                   <span className="size-2 rounded-full" style={{ background: on ? d.hue : "var(--border)" }} />
                   {d.name}
-                  {locked && <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">always</span>}
+                  {locked && (
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
+                      {d.mandatory ? "always" : "we design"}
+                    </span>
+                  )}
                 </button>
               );
             })}

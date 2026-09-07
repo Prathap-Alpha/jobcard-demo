@@ -158,7 +158,7 @@ export default function Dept() {
         <Column title="On the bench" count={q.working.length} accent={dept.hue}>
           {q.working.length === 0 ? <Empty>Nothing started yet.</Empty> :
             q.working.map(o => (
-              <JobCard key={o.id} order={o} dense>
+              <JobCard key={o.id} order={o} dense showMoney={false}>
                 <Chip tone="ink">{o.stages.find(s => s.dept === dept.id)?.assignee}</Chip>
                 <Btn size="sm" onClick={() => { finishStage(o.id, dept.id, who); toast.success(`${o.id} finished in ${dept.name}`, { description: nextHop(o, dept.id) }); }}>
                   Finish
@@ -170,7 +170,7 @@ export default function Dept() {
         <Column title="Waiting for us" count={workable.length} accent={dept.hue}>
           {workable.length === 0 ? <Empty>Queue is clear.</Empty> :
             workable.map(o => (
-              <JobCard key={o.id} order={o} dense>
+              <JobCard key={o.id} order={o} dense showMoney={false}>
                 <Btn size="sm" variant="soft" onClick={() => { claimStage(o.id, dept.id, who); toast.message(`${who} picked up ${o.id}`); }}>
                   Start
                 </Btn>
@@ -221,7 +221,7 @@ export default function Dept() {
           <SectionTitle count={q.done.length}>Finished by {dept.name} today</SectionTitle>
           <div className="grid gap-3 lg:grid-cols-3">
             {q.done.slice(0, 6).map(o => (
-              <JobCard key={o.id} order={o} dense>
+              <JobCard key={o.id} order={o} dense showMoney={false}>
                 <Chip tone="ok">done by {o.stages.find(s => s.dept === dept.id)?.assignee ?? "—"}</Chip>
               </JobCard>
             ))}
