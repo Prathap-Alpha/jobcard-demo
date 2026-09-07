@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { Mark } from "@/components/jc";
 import {
   DEPTS, currentDept, deptById, hoursLeft, isComplete, isOverdue, orderTypeById,
-  productionBlocked, type Order,
+  proofIsOut, type Order,
 } from "@/lib/domain";
 import { useStore } from "@/lib/store";
 import { cn } from "@/lib/utils";
@@ -22,28 +22,28 @@ export default function Board() {
 
   const live = orders.filter(o => !o.collectedAt && o.delivery !== "delivered");
   const ready = live.filter(o => isComplete(o));
-  const holding = live.filter(o => productionBlocked(o) && !isComplete(o));
+  const holding = live.filter(o => proofIsOut(o) && !isComplete(o));
   const running = live
-    .filter(o => !isComplete(o) && !productionBlocked(o))
+    .filter(o => !isComplete(o) && !proofIsOut(o))
     .sort((a, b) => a.dueAt - b.dueAt);
   const late = live.filter(o => isOverdue(o, now));
 
   return (
     <div className="min-h-screen bg-[oklch(0.155_0.012_262)] text-white paper-grid">
-      <header className="flex items-center justify-between border-b border-white/10 px-8 py-5">
+      <header className="flex flex-wrap items-center justify-between gap-x-6 gap-y-4 border-b border-white/10 px-5 py-4 sm:px-8 sm:py-5">
         <Link href="/" className="text-white"><Mark /></Link>
-        <div className="flex items-baseline gap-8">
+        <div className="flex flex-1 items-baseline justify-between gap-4 sm:flex-none sm:justify-start sm:gap-8">
           <BoardStat n={running.length} label="in production" />
           <BoardStat n={holding.length} label="waiting on client" tone="var(--warn)" />
           <BoardStat n={ready.length} label="ready" tone="var(--ok)" />
           <BoardStat n={late.length} label="overdue" tone={late.length ? "var(--late)" : undefined} />
         </div>
-        <p className="tnum font-mono text-2xl font-bold tabular-nums">
+        <p className="tnum hidden font-mono text-2xl font-bold tabular-nums sm:block">
           {new Date(now).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" })}
         </p>
       </header>
 
-      <div className="grid gap-6 px-8 py-7 xl:grid-cols-[1.6fr_1fr]">
+      <div className="grid gap-6 px-5 py-6 sm:px-8 sm:py-7 xl:grid-cols-[1.6fr_1fr]">
         <section>
           <BoardHead>On the floor</BoardHead>
           <div className="grid gap-3 md:grid-cols-2">
@@ -90,7 +90,7 @@ export default function Board() {
         </div>
       </div>
 
-      <footer className="flex flex-wrap items-center gap-x-6 gap-y-2 border-t border-white/10 px-8 py-4">
+      <footer className="flex flex-wrap items-center gap-x-6 gap-y-2 border-t border-white/10 px-5 py-4 sm:px-8">
         {DEPTS.map(d => {
           const n = live.filter(o => currentDept(o) === d.id).length;
           return (
@@ -111,7 +111,7 @@ function BoardStat({ n, label, tone }: { n: number; label: string; tone?: string
   return (
     <div className="text-center">
       <p className="tnum font-display text-3xl font-bold leading-none" style={{ color: tone ?? "white" }}>{n}</p>
-      <p className="mt-1 text-[11px] font-semibold uppercase tracking-wider text-white/45">{label}</p>
+      <p className="mt-1 whitespace-nowrap text-[10px] font-semibold uppercase tracking-wider text-white/45 sm:text-[11px]">{label}</p>
     </div>
   );
 }
