@@ -44,6 +44,14 @@ demo runs entirely in the browser and stores its state in that browser only. The
 11. **Odoo stays the books.** Each job carries its Odoo quotation reference. Odoo keeps
     doing quotes and invoices; this replaces the paper card and the WhatsApp group.
 
+## What it does not do yet
+
+Three of the client's rules are demonstrated rather than enforced, because the
+demo has no server: manager-only order creation, server-side department scoping,
+and an overnight scheduler for the overdue chase. Odoo is referenced but not
+connected. These were found by an independent code review and are written up in
+[LIMITATIONS.md](LIMITATIONS.md) rather than glossed over.
+
 ## Running it locally
 
 ```bash
