@@ -5,8 +5,8 @@ import {
   Btn, Chip, DeptDot, Empty, JobCard, PageHead, RouteRail, SectionTitle, Shell, Stat,
 } from "@/components/jc";
 import {
-  DEPTS, PRE_APPROVAL_DEPTS, currentDept, deptById, fmtDue, isOverdue, orderTypeById, productionBlocked,
-  stageUnlocked, type DeptId, type Order,
+  DEPTS, PRE_APPROVAL_DEPTS, currentDept, deptById, fmtDue, isOverdue, orderTypeById,
+  productionBlocked, stageUnlocked, type DeptId, type Order,
 } from "@/lib/domain";
 import { useDeptQueue, useStore } from "@/lib/store";
 import { cn } from "@/lib/utils";
@@ -22,8 +22,12 @@ export function Floor() {
       />
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
         {DEPTS.map(d => {
-          const mine = orders.filter(o => o.route.includes(d.id) && !o.collectedAt && o.delivery !== "delivered");
-          const here = mine.filter(o => currentDept(o) === d.id);
+          // Count only what this room can act on. Counting a job that is still
+          // held behind the customer's sign-off made the tile disagree with the
+          // room's own screen, which files that job under "coming to us".
+          const mine = orders.filter(o =>
+            !o.enquiry && o.route.includes(d.id) && !o.collectedAt && o.delivery !== "delivered");
+          const here = mine.filter(o => currentDept(o) === d.id && stageUnlocked(o, d.id));
           const late = here.filter(o => isOverdue(o)).length;
           const alerts = unseen[d.id]?.length ?? 0;
           return (

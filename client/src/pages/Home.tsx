@@ -22,7 +22,7 @@ const SERVICES: { id: OrderTypeId; blurb: string; from: number; unit: string }[]
 ];
 
 const STEPS = [
-  { n: "01", t: "Tell us what you need", d: "Walk in, WhatsApp us, or send the form below. You get a price the same day." },
+  { n: "01", t: "Ask us for a price", d: "Walk in, WhatsApp us, or send the form below. You get a firm price the same day, and nothing is booked until you accept it." },
   { n: "02", t: "Approve the artwork", d: "We send you a proof. Nothing touches a machine until you say yes. Two changes are free." },
   { n: "03", t: "We print it", d: "Your job moves through only the departments it needs. You get a message at every step." },
   { n: "04", t: "Collect or we deliver", d: "We tell you it is ready and exactly what is left to pay. Gaborone delivery from P60." },
@@ -30,7 +30,7 @@ const STEPS = [
 
 const PROMISES = [
   { t: "Same-day on small runs", d: "Stickers, flyers and business cards in before 10am are ready before we close." },
-  { t: "No surprise invoices", d: "The price you approve is the price you pay. Extra design changes are quoted before we do them." },
+  { t: "No surprise invoices", d: "The price you approve is the price you pay. Your first two design changes are free, and any after that are P150 each." },
   { t: "You are never guessing", d: "A text and an email at every stage, and the ready message tells you the balance owing." },
   { t: "Seven departments, one roof", d: "Design, sublimation, DTF, sewing and embroidery all in-house. Nothing gets sub-contracted and lost." },
 ];
@@ -148,20 +148,29 @@ function QuoteForm() {
 
   const send = () => {
     if (!ready) return;
+    // This is a price REQUEST, not an order. Nothing is quoted, nothing is owed,
+    // no date is promised and it is not in Odoo. The front desk prices it and
+    // turns it into a real job, which keeps "only managers create orders" true.
     const o = createOrder({
+      enquiry: true,
       customer: f.name.trim(), contact: f.phone.trim(), email: f.email.trim(),
       type: f.type, description: f.detail.trim(), qty,
-      route: normaliseRoute(orderTypeById(f.type).defaultRoute.filter(d => d !== "admin" && d !== "accounts")),
+      // A customer who brings finished artwork does not need the design room.
+      route: normaliseRoute(
+        orderTypeById(f.type).defaultRoute
+          .filter(d => d !== "admin" && d !== "accounts")
+          .filter(d => !(f.own && d === "design")),
+      ),
       artwork: f.own ? "client_supplied" : "in_house",
-      dueAt: Date.now() + 48 * 3_600_000,
+      dueAt: Date.now() + 48 * 3_600_000,   // provisional only; never promised to anyone
       priority: "standard",
-      total: estimate, deposit: 0,
+      total: 0, deposit: 0,
       fulfilment: "collection",
-      notes: "Came in through the website",
+      notes: "Price request from the website",
     });
     toast.success(`Thank you, ${f.name.trim()}`, {
-      description: `Your job is ${o.id}. We have texted and emailed you.`,
-      action: { label: "Track it", onClick: () => nav(`/client?job=${o.id}`) },
+      description: "We have your request and will come back today with a price. Nothing is booked yet.",
+      action: { label: "See it arrive", onClick: () => nav("/ops") },
     });
     setF({ name: "", phone: "+267 ", email: "", type: "banners", qty: "10", detail: "", own: false });
   };
@@ -203,15 +212,15 @@ function QuoteForm() {
 
       <div className="mt-6 flex flex-wrap items-center justify-between gap-4 border-t border-white/10 pt-5">
         <div>
-          <p className="text-[11px] font-bold uppercase tracking-wider text-white/40">Rough guide</p>
-          <p className="tnum font-display text-2xl font-bold text-white">{fmtP(estimate)}</p>
-          <p className="text-[11.5px] text-white/40">We confirm the real price same day.</p>
+          <p className="text-[11px] font-bold uppercase tracking-wider text-white/40">Ballpark only</p>
+          <p className="tnum font-display text-2xl font-bold text-white/70">around {fmtP(estimate)}</p>
+          <p className="text-[11.5px] text-white/40">Not a quote. We price it properly and come back today.</p>
         </div>
         <button
           type="button" onClick={send} disabled={!ready}
           className="h-12 rounded-xl bg-white px-7 text-[14px] font-bold text-[oklch(0.16_0.012_262)] transition hover:scale-[1.02] disabled:cursor-not-allowed disabled:opacity-30"
         >
-          Send it through
+          Ask for a price
         </button>
       </div>
     </div>
@@ -226,9 +235,17 @@ function TrackBox() {
   const [q, setQ] = useState("");
   const go = () => {
     const t = q.trim().toUpperCase();
-    const hit = orders.find(o => o.id.toUpperCase() === t || o.id.toUpperCase().endsWith(t));
+    const miss = () => toast.error("We cannot find that job number", {
+      description: "It looks like JC-2609-142. It is on your receipt and in the text we sent.",
+    });
+    if (t.length < 3) return miss();
+    // Exact first. A partial must be at least three digits and match one job only,
+    // otherwise we would hand the customer somebody else's order.
+    const exact = orders.find(o => o.id.toUpperCase() === t && o.enquiry !== true);
+    const partial = orders.filter(o => o.enquiry !== true && o.id.toUpperCase().endsWith(t));
+    const hit = exact ?? (partial.length === 1 ? partial[0] : undefined);
     if (hit) nav(`/client?job=${hit.id}`);
-    else toast.error("We cannot find that job number", { description: "It looks like JC-2609-142. It is on your receipt and in the text we sent." });
+    else miss();
   };
   return (
     <div className="flex flex-col gap-2 sm:flex-row">

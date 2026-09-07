@@ -8,7 +8,9 @@ import {
 import { compose, type Channel, type Message, type MessageKind } from "./messages";
 import { SEED } from "./seed";
 
-const LS_KEY = "jobcard.demo.v1";
+// Bumped whenever the seeded sample day changes, otherwise a browser that saw an
+// earlier version keeps showing it and never picks up the corrections.
+const LS_KEY = "jobcard.demo.v2";
 
 export interface Event {
   id: string;
@@ -27,6 +29,7 @@ interface Snapshot {
 }
 
 export interface NewOrder {
+  enquiry?: boolean;
   customer: string; contact: string; email: string;
   type: Order["type"]; description: string; qty: number;
   route: DeptId[]; artwork: Order["artwork"];
@@ -47,6 +50,7 @@ interface Store extends Snapshot {
   markDelivered: (orderId: string) => void;
   markCollected: (orderId: string) => void;
   chaseOverdue: () => number;
+  convertEnquiry: (orderId: string) => void;
   acknowledge: (dept: DeptId) => void;
   reset: () => void;
 }
@@ -136,8 +140,10 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     );
     const order: Order = {
       id: nextJobNumber(snapRef.current.orders),
-      odooRef: `SO-2026-${String(Math.floor(Math.random() * 9000) + 1000)}`,
-      odooSynced: true,
+      // The seeded day uses SO-2026-1403..1472, so start above it.
+      odooRef: d.enquiry ? "" : `SO-2026-${2000 + Math.floor(Math.random() * 900)}`,
+      odooSynced: d.enquiry ? false : true,
+      enquiry: d.enquiry,
       customer: d.customer, contact: d.contact, email: d.email,
       type: d.type, description: d.description, qty: d.qty,
       route, stages: buildStages(route),
@@ -152,8 +158,10 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     patch(s => ({
       ...s,
       orders: [order, ...s.orders],
-      messages: notify(s, order, "received"),
-      events: log(s, order.id, "Operations Manager", "Order created and job card opened"),
+      messages: notify(s, order, d.enquiry ? "enquiry_received" : "received"),
+      events: log(s, order.id,
+        d.enquiry ? "Website" : "Operations Manager",
+        d.enquiry ? "Price request came in from the website" : "Order created and job card opened"),
       unseen: { ...s.unseen, admin: [order.id, ...(s.unseen.admin ?? [])] },
     }));
     return order;
@@ -354,6 +362,11 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     return due.length;
   }, [patch, notify]);
 
+  /** The front desk has priced a website enquiry, so it becomes a real job. */
+  const convertEnquiry = useCallback((orderId: string) => {
+    patch(s => ({ ...s, orders: s.orders.filter(o => o.id !== orderId) }));
+  }, [patch]);
+
   const acknowledge = useCallback((dept: DeptId) => {
     patch(s => (s.unseen[dept]?.length ? { ...s, unseen: { ...s.unseen, [dept]: [] } } : s));
   }, [patch]);
@@ -369,9 +382,11 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
 
   const value = useMemo<Store>(() => ({
     ...snap, createOrder, claimStage, finishStage, approveDesign, requestChanges,
-    takePayment, dispatchOrder, markDelivered, markCollected, chaseOverdue, acknowledge, reset,
+    takePayment, dispatchOrder, markDelivered, markCollected, chaseOverdue, convertEnquiry,
+    acknowledge, reset,
   }), [snap, createOrder, claimStage, finishStage, approveDesign, requestChanges,
-    takePayment, dispatchOrder, markDelivered, markCollected, chaseOverdue, acknowledge, reset]);
+    takePayment, dispatchOrder, markDelivered, markCollected, chaseOverdue, convertEnquiry,
+    acknowledge, reset]);
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }
@@ -386,7 +401,8 @@ export function useStore() {
 export function useDeptQueue(dept: DeptId) {
   const { orders } = useStore();
   return useMemo(() => {
-    const mine = orders.filter(o => o.route.includes(dept) && !o.collectedAt && o.delivery !== "delivered");
+    const mine = orders.filter(o =>
+      o.enquiry !== true && o.route.includes(dept) && !o.collectedAt && o.delivery !== "delivered");
     const at = (o: Order) => o.stages.find(s => s.dept === dept)!;
     const byDue = (a: Order, b: Order) => a.dueAt - b.dueAt;
     return {

@@ -35,10 +35,21 @@ function Field({ label, hint, children }: { label: string; hint?: string; childr
 const inputCls =
   "h-9 w-full rounded-lg border bg-card px-3 text-[13.5px] outline-none transition-shadow placeholder:text-muted-foreground/60 focus:ring-2 focus:ring-ring";
 
-function NewOrderForm({ onDone }: { onDone: () => void }) {
-  const { createOrder } = useStore();
-  const [f, setF] = useState(blank);
-  const [extra, setExtra] = useState<DeptId[]>(["design"]);
+function NewOrderForm({ onDone, from }: { onDone: () => void; from?: Order }) {
+  const { createOrder, convertEnquiry } = useStore();
+  const [f, setF] = useState(() => from
+    ? {
+      ...blank,
+      customer: from.customer, contact: from.contact, email: from.email,
+      type: from.type, description: from.description, qty: String(from.qty),
+      artwork: from.artwork,
+      fulfilment: from.fulfilment, address: from.address ?? "",
+      notes: from.notes ?? "",
+    }
+    : blank);
+  const [extra, setExtra] = useState<DeptId[]>(
+    from ? from.route.filter(d => d !== "admin" && d !== "accounts") : ["design"],
+  );
   const set = <K extends keyof typeof blank>(k: K, v: (typeof blank)[K]) => setF(p => ({ ...p, [k]: v }));
 
   const route = useMemo(
@@ -76,8 +87,11 @@ function NewOrderForm({ onDone }: { onDone: () => void }) {
       address: f.fulfilment === "delivery" ? f.address.trim() : undefined,
       notes: f.notes.trim() || undefined,
     });
+    if (from) convertEnquiry(from.id);
     toast.success(`Job card ${o.id} opened`, {
-      description: `${o.customer}. Sent to Admin, and the customer has been texted and emailed.`,
+      description: from
+        ? `${o.customer} priced and booked in. The customer has been texted and emailed.`
+        : `${o.customer}. Sent to Admin, and the customer has been texted and emailed.`,
     });
     setF(blank);
     setExtra(["design"]);
@@ -88,8 +102,14 @@ function NewOrderForm({ onDone }: { onDone: () => void }) {
     <div className="rounded-2xl border bg-card p-5 jc-in">
       <div className="mb-5 flex items-center justify-between">
         <div>
-          <h2 className="font-display text-lg font-bold">New job card</h2>
-          <p className="text-[13px] text-muted-foreground">Only an Operations Manager can open one.</p>
+          <h2 className="font-display text-lg font-bold">
+            {from ? `Price ${from.id} and book it in` : "New job card"}
+          </h2>
+          <p className="text-[13px] text-muted-foreground">
+            {from
+              ? "Came off the website. Set the price and the ready-by time, then it becomes a real job."
+              : "Only an Operations Manager can open one."}
+          </p>
         </div>
         <Btn variant="ghost" size="sm" onClick={onDone}>Close</Btn>
       </div>
@@ -211,13 +231,16 @@ export default function Ops() {
   const { orders, chaseOverdue, reset } = useStore();
   const [, nav] = useLocation();
   const [open, setOpen] = useState(false);
+  const [pricing, setPricing] = useState<Order | undefined>();
   const [filter, setFilter] = useState<Filter>("live");
   const [q, setQ] = useState("");
 
-  const late = orders.filter(o => isOverdue(o));
+  const enquiries = orders.filter(o => o.enquiry);
+  const jobs = orders.filter(o => !o.enquiry);
+  const late = jobs.filter(o => isOverdue(o));
   const shown = useMemo(() => {
     const t = q.trim().toLowerCase();
-    return orders
+    return jobs
       .filter(o => {
         if (t && !`${o.id} ${o.customer} ${o.description} ${o.odooRef}`.toLowerCase().includes(t)) return false;
         const st = orderState(o);
@@ -228,17 +251,17 @@ export default function Ops() {
         return true;
       })
       .sort((a, b) => a.dueAt - b.dueAt);
-  }, [orders, filter, q]);
+  }, [jobs, filter, q]);
 
   const tabs: { id: Filter; label: string; n: number }[] = [
-    { id: "live", label: "On the floor", n: orders.filter(o => orderState(o) !== "closed").length },
-    { id: "approval", label: "Waiting on client", n: orders.filter(o => orderState(o) === "awaiting_approval").length },
-    { id: "ready", label: "Ready / out", n: orders.filter(o => ["ready", "out_for_delivery"].includes(orderState(o))).length },
+    { id: "live", label: "On the floor", n: jobs.filter(o => orderState(o) !== "closed").length },
+    { id: "approval", label: "Waiting on client", n: jobs.filter(o => orderState(o) === "awaiting_approval").length },
+    { id: "ready", label: "Ready / out", n: jobs.filter(o => ["ready", "out_for_delivery"].includes(orderState(o))).length },
     { id: "late", label: "Overdue", n: late.length },
-    { id: "all", label: "Everything", n: orders.length },
+    { id: "all", label: "Everything", n: jobs.length },
   ];
 
-  const owed = orders.reduce((s, o) => s + balanceOf(o), 0);
+  const owed = jobs.reduce((s, o) => s + balanceOf(o), 0);
 
   return (
     <Shell>
@@ -250,17 +273,57 @@ export default function Ops() {
             <Btn variant="soft" onClick={() => { const n = chaseOverdue(); toast[n ? "success" : "message"](n ? `${n} overdue customer${n > 1 ? "s" : ""} chased` : "Nothing overdue right now"); }}>
               Chase overdue
             </Btn>
-            <Btn onClick={() => setOpen(v => !v)}>+ New order</Btn>
+            <Btn onClick={() => { setOpen(v => !v); setPricing(undefined); }}>+ New order</Btn>
           </>
         }
       />
 
       <div className="mb-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <Stat label="Open jobs" value={orders.filter(o => !isComplete(o)).length} hint="Still moving between departments" />
-        <Stat label="Waiting on the client" value={orders.filter(o => orderState(o) === "awaiting_approval").length} hint="Nothing prints until they approve" tone="warn" />
+        <Stat label="Open jobs" value={jobs.filter(o => !isComplete(o)).length} hint="Still moving between departments" />
+        <Stat label="Waiting on the client" value={jobs.filter(o => orderState(o) === "awaiting_approval").length} hint="Nothing prints until they approve" tone="warn" />
         <Stat label="Overdue" value={late.length} hint="Past the promised date" tone={late.length ? "late" : undefined} />
         <Stat label="Money outstanding" value={fmtP(owed)} hint="Across all uncollected jobs" />
       </div>
+
+      {enquiries.length > 0 && (
+        <section className="mb-6 rounded-2xl border-2 border-dashed p-5" style={{ borderColor: "var(--dept-design)" }}>
+          <div className="mb-3 flex items-center gap-2">
+            <span className="size-2.5 rounded-full jc-pulse" style={{ background: "var(--dept-design)" }} />
+            <h2 className="font-display text-base font-bold">
+              {enquiries.length} price request{enquiries.length > 1 ? "s" : ""} off the website
+            </h2>
+            <span className="text-[13px] text-muted-foreground">
+              Not jobs yet. Nothing quoted, nothing owed, no date promised.
+            </span>
+          </div>
+          <div className="space-y-2.5">
+            {enquiries.map(e => (
+              <div key={e.id} className="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-xl border bg-card px-4 py-3">
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2">
+                    <span className="font-mono text-[11px] font-bold text-muted-foreground">{e.id}</span>
+                    <Chip tone="muted">{orderTypeById(e.type).name} · {e.qty}</Chip>
+                    {e.artwork === "client_supplied" && <Chip tone="muted">has own artwork</Chip>}
+                  </div>
+                  <p className="mt-0.5 truncate font-display text-[15px] font-semibold">{e.customer}</p>
+                  <p className="truncate text-[13px] text-muted-foreground">{e.description}</p>
+                </div>
+                <div className="text-[12.5px] text-muted-foreground">
+                  <p>{e.contact}</p>
+                  <p>{e.email}</p>
+                </div>
+                <Btn size="sm" onClick={() => { setPricing(e); setOpen(false); }}>Price it</Btn>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
+
+      {pricing && (
+        <div className="mb-6">
+          <NewOrderForm from={pricing} onDone={() => setPricing(undefined)} />
+        </div>
+      )}
 
       {open && <div className="mb-6"><NewOrderForm onDone={() => setOpen(false)} /></div>}
 

@@ -20,7 +20,7 @@ export default function Board() {
     return () => clearInterval(t);
   }, []);
 
-  const live = orders.filter(o => !o.collectedAt && o.delivery !== "delivered");
+  const live = orders.filter(o => !o.enquiry && !o.collectedAt && o.delivery !== "delivered");
   const ready = live.filter(o => isComplete(o));
   const holding = live.filter(o => proofIsOut(o) && !isComplete(o));
   const running = live

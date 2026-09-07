@@ -12,7 +12,7 @@ export default function Accounts() {
   const { orders, takePayment, finishStage, dispatchOrder, markDelivered, markCollected } = useStore();
   const [driver, setDriver] = useState(DRIVERS[0]);
 
-  const live = orders.filter(o => !o.collectedAt && o.delivery !== "delivered");
+  const live = orders.filter(o => !o.enquiry && !o.collectedAt && o.delivery !== "delivered");
 
   /** Accounts is the last stop on every job: settle up, then release it. */
   const atAccounts = useMemo(
@@ -25,9 +25,9 @@ export default function Accounts() {
   const onTheRoad = live.filter(o => o.delivery === "out_for_delivery");
 
   // Money owed does not disappear because the goods left the building.
-  const debtors = orders.filter(o => isDebtor(o));
+  const debtors = orders.filter(o => !o.enquiry && isDebtor(o));
   const owed = live.reduce((s, o) => s + balanceOf(o), 0) + debtors.reduce((s, o) => s + balanceOf(o), 0);
-  const takenToday = orders.reduce((s, o) => s + o.deposit, 0);
+  const takenToday = orders.filter(o => !o.enquiry).reduce((s, o) => s + o.deposit, 0);
 
   return (
     <Shell>
@@ -46,6 +46,35 @@ export default function Accounts() {
         <Stat label="At this desk" value={atAccounts.length} hint="Waiting to be released" />
         <Stat label="Out for delivery" value={onTheRoad.length} hint="With a driver right now" />
       </div>
+
+      {debtors.length > 0 && (
+        <section className="mb-8 rounded-2xl border-2 p-5" style={{ borderColor: "var(--late)" }}>
+          <div className="mb-3 flex flex-wrap items-center gap-2">
+            <span className="size-2.5 rounded-full" style={{ background: "var(--late)" }} />
+            <h2 className="font-display text-base font-bold">
+              Debtors · {fmtP(debtors.reduce((s, o) => s + balanceOf(o), 0))} still to collect
+            </h2>
+            <span className="text-[13px] text-muted-foreground">
+              These jobs left the shop before they were paid for.
+            </span>
+          </div>
+          <div className="space-y-2.5">
+            {debtors.map(o => (
+              <div key={o.id} className="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-xl border bg-card px-4 py-3">
+                <div className="min-w-0 flex-1">
+                  <span className="font-mono text-[11px] font-bold text-muted-foreground">{o.id}</span>
+                  <p className="truncate font-display text-[15px] font-semibold">{o.customer}</p>
+                  <p className="truncate text-[13px] text-muted-foreground">
+                    {orderTypeById(o.type).name} · {o.qty} · {o.collectedAt ? "collected" : "delivered"}
+                  </p>
+                </div>
+                <p className="tnum font-display text-lg font-bold" style={{ color: "var(--late)" }}>{fmtP(balanceOf(o))}</p>
+                <QuickPay order={o} />
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
 
       <div className="grid gap-8 xl:grid-cols-2 [&>*]:min-w-0">
         <section>
@@ -68,9 +97,7 @@ export default function Accounts() {
               {forCollection.length === 0 ? <Empty>Shelf is clear.</Empty> :
                 forCollection.map(o => (
                   <JobCard key={o.id} order={o} dense>
-                    {balanceOf(o) > 0
-                      ? <Chip tone="warn">{fmtP(balanceOf(o))} on collection</Chip>
-                      : <Chip tone="ok">paid in full</Chip>}
+                    <QuickPay order={o} />
                     <CollectBtn order={o} onCollect={() => { markCollected(o.id); }} />
                   </JobCard>
                 ))}
@@ -94,9 +121,8 @@ export default function Accounts() {
                   {toDeliver.map(o => (
                     <JobCard key={o.id} order={o} dense>
                       <Chip tone="muted">{o.address}</Chip>
-                      <Btn size="sm" onClick={() => { dispatchOrder(o.id, driver); toast.success(`${o.id} out with ${driver}`); }}>
-                        Send out
-                      </Btn>
+                      <QuickPay order={o} />
+                      <SendOutBtn order={o} onSend={() => dispatchOrder(o.id, driver)} driver={driver} />
                     </JobCard>
                   ))}
                   {onTheRoad.map(o => (
@@ -117,6 +143,29 @@ export default function Accounts() {
   );
 }
 
+/**
+ * Take money on a job that has already left the Accounts desk. Without this the
+ * only place to record a payment was the desk itself, so the balance a customer
+ * settles on collection could never be entered anywhere.
+ */
+function QuickPay({ order }: { order: Order }) {
+  const { takePayment } = useStore();
+  const bal = balanceOf(order);
+  if (bal === 0) return <Chip tone="ok">paid in full</Chip>;
+  return (
+    <Btn
+      size="sm" variant="soft"
+      onClick={e => {
+        e.stopPropagation();
+        takePayment(order.id, bal);
+        toast.success(`${fmtP(bal)} taken on ${order.id}`, { description: "Settled in full." });
+      }}
+    >
+      Take {fmtP(bal)}
+    </Btn>
+  );
+}
+
 /** Letting goods out with money owing needs a second, deliberate press. */
 function CollectBtn({ order, onCollect }: { order: Order; onCollect: () => void }) {
   const [armed, setArmed] = useState(false);
@@ -130,6 +179,21 @@ function CollectBtn({ order, onCollect }: { order: Order; onCollect: () => void 
   return (
     <Btn size="sm" variant="danger" onClick={() => { onCollect(); toast.warning(`${order.id} left with ${fmtP(bal)} owing`, { description: "It is now on the debtors list." }); }}>
       Let it go, {fmtP(bal)} owing
+    </Btn>
+  );
+}
+
+/** A van leaving with unpaid goods gets the same deliberate second press. */
+function SendOutBtn({ order, onSend, driver }: { order: Order; onSend: () => void; driver: string }) {
+  const [armed, setArmed] = useState(false);
+  const bal = balanceOf(order);
+  if (bal === 0) {
+    return <Btn size="sm" onClick={() => { onSend(); toast.success(`${order.id} out with ${driver}`); }}>Send out</Btn>;
+  }
+  if (!armed) return <Btn size="sm" variant="soft" onClick={() => setArmed(true)}>Send out</Btn>;
+  return (
+    <Btn size="sm" variant="danger" onClick={() => { onSend(); toast.warning(`${order.id} left with ${fmtP(bal)} owing`, { description: "It is now on the debtors list." }); }}>
+      Send anyway, {fmtP(bal)} owing
     </Btn>
   );
 }
@@ -158,7 +222,7 @@ function AccountRow({ o, onPay, onRelease }: { o: Order; onPay: (id: string, amt
         />
         <Btn
           size="sm" variant="soft"
-          disabled={!Number(amt) || Number(amt) > bal}
+          disabled={!(Number(amt) > 0) || Number(amt) > bal}
           title={Number(amt) > bal ? `That is more than the ${fmtP(bal)} owing` : undefined}
           onClick={() => { onPay(o.id, Number(amt)); setAmt(""); toast.success(`${fmtP(Number(amt))} recorded on ${o.id}`); }}
         >

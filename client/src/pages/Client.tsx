@@ -17,7 +17,7 @@ export default function Client() {
   const [note, setNote] = useState("");
 
   const tracked = useMemo(
-    () => orders.filter(o => !o.collectedAt && o.delivery !== "delivered"),
+    () => orders.filter(o => !o.enquiry && !o.collectedAt && o.delivery !== "delivered"),
     [orders],
   );
   const order = orders.find(o => o.id === wanted) ?? tracked[0];

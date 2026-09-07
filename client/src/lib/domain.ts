@@ -68,6 +68,12 @@ export type DeliveryStage = "not_started" | "packed" | "out_for_delivery" | "del
 
 export interface Order {
   id: string;               // JC-2609-014
+  /**
+   * A price request that came off the website. Nobody has quoted it, nothing is
+   * owed, no date has been promised and it is not in Odoo. It waits on the front
+   * desk until an Operations Manager prices it and turns it into a real job.
+   */
+  enquiry?: boolean;
   odooRef: string;          // quotation / invoice reference already living in Odoo
   odooSynced: boolean;
   customer: string;
@@ -141,13 +147,17 @@ export const downstreamOfDesign = (o: Order): DeptId[] => {
 export const isDebtor = (o: Order) =>
   (o.collectedAt !== undefined || o.delivery === "delivered") && balanceOf(o) > 0;
 
+/** Nothing has been promised on an enquiry, so it can never be late. */
 export const isOverdue = (o: Order, now = Date.now()) =>
+  o.enquiry === true ? false : _isOverdue(o, now);
+
+const _isOverdue = (o: Order, now = Date.now()) =>
   !isComplete(o) && now > o.dueAt;
 
 export const hoursLeft = (o: Order, now = Date.now()) =>
   Math.round((o.dueAt - now) / 3_600_000);
 
-export type OrderState = "awaiting_approval" | "in_production" | "ready" | "out_for_delivery" | "closed";
+export type OrderState = "enquiry" | "awaiting_approval" | "in_production" | "ready" | "out_for_delivery" | "closed";
 
 /**
  * A job only counts as waiting on the client once Design has actually sent a
@@ -157,6 +167,7 @@ export const proofIsOut = (o: Order) =>
   productionBlocked(o) && o.stages.some(s => s.dept === "design" && s.status === "done");
 
 export const orderState = (o: Order): OrderState => {
+  if (o.enquiry) return "enquiry";
   if (o.collectedAt || o.delivery === "delivered") return "closed";
   if (o.delivery === "out_for_delivery") return "out_for_delivery";
   if (isComplete(o)) return "ready";
@@ -165,6 +176,7 @@ export const orderState = (o: Order): OrderState => {
 };
 
 export const STATE_LABEL: Record<OrderState, string> = {
+  enquiry: "Price request",
   awaiting_approval: "Waiting on client",
   in_production: "In production",
   ready: "Ready",

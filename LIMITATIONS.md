@@ -9,9 +9,11 @@ they are written down here rather than glossed over.
 ## 1. "Only Operations Managers can create orders" is a screen rule, not a lock
 
 The New Order form exists only on the front desk, so in the demo nobody else can
-open a job. But there is no login and no server, so the rule lives in the layout.
-In the real build order creation sits behind an Operations Manager permission
-checked on the server, not in the browser.
+open a job. The website form does NOT create an order: it creates a price request
+that carries no price, no promised date and no Odoo number, and an Operations
+Manager has to price it before it becomes a job. But there is no login and no
+server, so the rule still lives in the layout. In the real build order creation
+sits behind an Operations Manager permission checked on the server.
 
 ## 2. "Staff see only their own department" is enforced in what is drawn, not in what is sent
 

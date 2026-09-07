@@ -16,10 +16,12 @@ export interface Message {
 }
 
 export type MessageKind =
+  | "enquiry_received"
   | "received" | "proof_ready" | "in_production" | "ready_collection"
   | "out_for_delivery" | "delivered" | "overdue_reminder" | "revision_charged";
 
 export const MESSAGE_LABEL: Record<MessageKind, string> = {
+  enquiry_received: "Price request received",
   received: "Order received",
   proof_ready: "Proof ready to approve",
   in_production: "Approved — in production",
@@ -47,6 +49,14 @@ export function compose(kind: MessageKind, o: Order): { sms: string; email: { su
       : `Your account is settled in full, thank you.`;
 
   switch (kind) {
+    case "enquiry_received":
+      return {
+        sms: `Hi ${o.customer}, we have your request for ${job(o)}. We will come back to you today with a price and a ready-by date. Nothing is booked yet.`,
+        email: {
+          subject: `We have your request — ${orderTypeById(o.type).name}`,
+          body: `Hi ${o.customer},\n\nThank you for the enquiry.\n\nWhat you asked for: ${o.description}\nQuantity: ${o.qty}\n\nOne of our team will come back to you today with a firm price and a ready-by date. Nothing is booked and nothing is owed until you accept the quote.\n\nIf it is urgent, call us on +267 395 4120.`,
+        },
+      };
     case "received":
       return {
         sms: `Hi ${o.customer}, we have your order ${o.id} for ${job(o)}. Ready by ${fmtDue(o.dueAt)}. Paid ${fmtP(o.deposit)} of ${fmtP(o.total)}.`,
