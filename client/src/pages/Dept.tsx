@@ -154,7 +154,7 @@ export default function Dept() {
         <Stat label="Overdue in my queue" value={[...q.working, ...workable].filter(o => isOverdue(o)).length} tone="late" hint="Past the promised date" />
       </div>
 
-      <div className="grid gap-6 lg:grid-cols-3">
+      <div className="grid gap-6 lg:grid-cols-3 [&>*]:min-w-0">
         <Column title="On the bench" count={q.working.length} accent={dept.hue}>
           {q.working.length === 0 ? <Empty>Nothing started yet.</Empty> :
             q.working.map(o => (
@@ -219,7 +219,7 @@ export default function Dept() {
       {q.done.length > 0 && (
         <div className="mt-8">
           <SectionTitle count={q.done.length}>Finished by {dept.name} today</SectionTitle>
-          <div className="grid gap-3 lg:grid-cols-3">
+          <div className="grid gap-3 lg:grid-cols-3 [&>*]:min-w-0">
             {q.done.slice(0, 6).map(o => (
               <JobCard key={o.id} order={o} dense showMoney={false}>
                 <Chip tone="ok">done by {o.stages.find(s => s.dept === dept.id)?.assignee ?? "—"}</Chip>

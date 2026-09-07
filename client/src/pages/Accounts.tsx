@@ -41,7 +41,7 @@ export default function Accounts() {
         <Stat label="Out for delivery" value={onTheRoad.length} hint="With a driver right now" />
       </div>
 
-      <div className="grid gap-8 xl:grid-cols-2">
+      <div className="grid gap-8 xl:grid-cols-2 [&>*]:min-w-0">
         <section>
           <SectionTitle count={atAccounts.length}>At the Accounts desk</SectionTitle>
           <div className="space-y-3">
@@ -55,7 +55,7 @@ export default function Accounts() {
           </div>
         </section>
 
-        <div className="space-y-8">
+        <div className="min-w-0 space-y-8">
           <section>
             <SectionTitle count={forCollection.length}>Waiting on the collection shelf</SectionTitle>
             <div className="space-y-3">
@@ -133,7 +133,7 @@ function AccountRow({ o, onPay, onRelease }: { o: Order; onPay: (id: string, amt
       <div className="mt-3.5 flex flex-wrap items-center gap-2 border-t pt-3.5">
         <input
           value={amt} onChange={e => setAmt(e.target.value)} inputMode="decimal" placeholder="Amount received"
-          className="h-8 w-36 rounded-lg border bg-background px-2.5 text-[13px] outline-none focus:ring-2 focus:ring-ring"
+          className="h-8 w-full rounded-lg border bg-background px-2.5 text-[13px] outline-none focus:ring-2 focus:ring-ring sm:w-36"
         />
         <Btn size="sm" variant="soft" disabled={!Number(amt)} onClick={() => { onPay(o.id, Number(amt)); setAmt(""); toast.success(`${fmtP(Number(amt))} recorded on ${o.id}`); }}>
           Record payment
@@ -143,7 +143,7 @@ function AccountRow({ o, onPay, onRelease }: { o: Order; onPay: (id: string, amt
             Settle {fmtP(bal)}
           </Btn>
         )}
-        <Btn size="sm" className="ml-auto" disabled={!ready} title={ready ? undefined : "Production is not finished yet"} onClick={onRelease}>
+        <Btn size="sm" className="w-full sm:ml-auto sm:w-auto" disabled={!ready} title={ready ? undefined : "Production is not finished yet"} onClick={onRelease}>
           Release the job
         </Btn>
       </div>

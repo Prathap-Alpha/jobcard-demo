@@ -48,7 +48,7 @@ export default function Client() {
         }
       />
 
-      <div className="grid gap-6 lg:grid-cols-[minmax(0,420px)_1fr]">
+      <div className="grid gap-6 lg:grid-cols-[minmax(0,420px)_1fr] [&>*]:min-w-0">
         {/* the phone */}
         <div className="rounded-[28px] border-8 border-[oklch(0.22_0.012_262)] bg-card p-5 shadow-2xl">
           <div className="mb-4 flex items-center justify-between">

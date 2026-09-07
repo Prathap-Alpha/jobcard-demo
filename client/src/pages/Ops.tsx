@@ -284,7 +284,7 @@ export default function Ops() {
       {shown.length === 0 ? (
         <Empty>No job cards match that.</Empty>
       ) : (
-        <div className="grid gap-3 lg:grid-cols-2 xl:grid-cols-3">
+        <div className="grid gap-3 lg:grid-cols-2 xl:grid-cols-3 [&>*]:min-w-0">
           {shown.map(o => (
             <JobCard key={o.id} order={o} onClick={() => nav(`/client?job=${o.id}`)}>
               <StateBadge order={o} />

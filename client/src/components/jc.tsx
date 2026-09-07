@@ -144,7 +144,7 @@ export function JobCard({
           )}
         </div>
       </div>
-      <div className={cn("flex items-center justify-between gap-3 border-t bg-[color-mix(in_oklch,var(--muted)_55%,white)] py-2", dense ? "px-3.5" : "px-4")}>
+      <div className={cn("flex flex-wrap items-center justify-between gap-x-3 gap-y-2 border-t bg-[color-mix(in_oklch,var(--muted)_55%,white)] py-2", dense ? "px-3.5" : "px-4")}>
         <RouteRail order={order} compact={dense} />
         <div className="flex items-center gap-2">{children}</div>
       </div>
@@ -248,7 +248,7 @@ export function Shell({ children, wide = false }: { children: React.ReactNode; w
           </span>
         </div>
       </header>
-      <main className={cn("mx-auto px-5 py-7", wide ? "max-w-none" : "max-w-[1400px]")}>{children}</main>
+      <main className={cn("mx-auto min-w-0 px-5 py-7", wide ? "max-w-none" : "max-w-[1400px]")}>{children}</main>
     </div>
   );
 }
